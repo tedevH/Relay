@@ -37,8 +37,8 @@ Relay only shells out to software you already have installed locally.
 
 Relay uses these local subprocess commands:
 
-- Claude: `claude -p "<task>"`
-- Codex: `codex exec "<task>"`
+- Claude: `claude --permission-mode acceptEdits -p "<task>"`
+- Codex: `codex --ask-for-approval never exec --sandbox workspace-write "<task>"`
 
 If any required dependency is missing, Relay still allows:
 
@@ -176,7 +176,7 @@ Main workflow:
 Forces Claude:
 
 ```bash
-claude -p "<task>"
+claude --permission-mode acceptEdits -p "<task>"
 ```
 
 ### `relay @codex "task"`
@@ -184,7 +184,7 @@ claude -p "<task>"
 Forces Codex:
 
 ```bash
-codex exec "<task>"
+codex --ask-for-approval never exec --sandbox workspace-write "<task>"
 ```
 
 ### `relay continue "task"`
@@ -317,12 +317,24 @@ relay history
 If `relay status` says a tool is missing, check that it runs directly in your terminal:
 
 ```bash
-claude -p "say hello"
-codex exec "say hello"
+claude --permission-mode acceptEdits -p "say hello"
+codex --ask-for-approval never exec --sandbox workspace-write "say hello"
 git status
 ```
 
 If those do not work directly, Relay cannot use them yet.
+
+If Codex says `writing is blocked by read-only sandbox`, Relay should invoke Codex with workspace-write sandboxing:
+
+```bash
+codex --ask-for-approval never exec --sandbox workspace-write "your task"
+```
+
+If Claude is not allowed to edit files, Relay should invoke Claude with edit permissions enabled:
+
+```bash
+claude --permission-mode acceptEdits -p "your task"
+```
 
 ## Future Monetization
 

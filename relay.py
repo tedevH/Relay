@@ -466,8 +466,16 @@ def warning_paths(files: list[str]) -> list[str]:
 
 def build_agent_command(agent: str, prompt: str) -> list[str]:
     if agent == "claude":
-        return ["claude", "-p", prompt]
-    return ["codex", "exec", prompt]
+        return ["claude", "--permission-mode", "acceptEdits", "-p", prompt]
+    return [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "--sandbox",
+        "workspace-write",
+        prompt,
+    ]
 
 
 def stream_subprocess(command: list[str], cwd: Path) -> tuple[int, str]:
