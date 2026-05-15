@@ -27,6 +27,7 @@ Relay only shells out to software you already have installed locally.
 - Lets you continue work with compact handoff context
 - Lets you review changes with the opposite agent
 - Summarizes the current diff locally
+- Lets you commit and push only after explicit confirmation
 
 ## Requirements
 
@@ -86,6 +87,8 @@ Relay reads these optional files if you already use them in your project:
 - `CLAUDE.md`
 
 This MVP does not create or modify those files on its own.
+
+Relay also adds `.relay/` to the local repo's `.git/info/exclude` so Relay memory stays local and is not accidentally committed.
 
 ## Commands
 
@@ -217,6 +220,28 @@ Shows:
 - potential risks
 - suggested commit message
 
+### `relay commit`
+
+Prepares a local git commit safely.
+
+- requires git and a repo
+- shows changed files first
+- warns about risky files
+- suggests a concise commit message
+- asks for confirmation before running `git add .` and `git commit -m ...`
+- never commits automatically after task, review, or summary
+
+### `relay push`
+
+Prepares a git push safely.
+
+- requires git and a repo
+- refuses when uncommitted changes are present
+- shows remote, branch, latest commit hash, and latest commit message
+- asks for confirmation before pushing
+- suggests `git push -u origin <branch>` when upstream is missing
+- never pushes automatically after task, review, or summary
+
 ### `relay history`
 
 Shows recent local Relay tasks from `.relay/tasks.json`.
@@ -308,6 +333,8 @@ relay doctor
 relay "make the dashboard mobile responsive"
 relay review
 relay summary
+relay commit
+relay push
 relay continue "clean up the follow-up issues"
 relay history
 ```
@@ -335,6 +362,13 @@ If Claude is not allowed to edit files, Relay should invoke Claude with edit per
 ```bash
 claude --permission-mode acceptEdits -p "your task"
 ```
+
+Relay stays local-first and safe around Git:
+
+- it never auto-commits after an AI task
+- it never auto-pushes after an AI task
+- `relay commit` always asks before creating a commit
+- `relay push` always asks before pushing to GitHub
 
 ## Future Monetization
 

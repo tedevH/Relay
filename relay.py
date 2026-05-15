@@ -28,6 +28,10 @@ INSTALL_HINTS = {
 
 SENSITIVE_PATH_PATTERNS = (
     ".env",
+    ".pem",
+    ".key",
+    "secrets",
+    "credentials",
     "package.json",
     "package-lock.json",
     "pnpm-lock.yaml",
@@ -201,6 +205,7 @@ def ensure_relay_files(repo: RepoState) -> None:
         raise RelayError("Relay repo state is unavailable outside a git repository.")
 
     repo.relay_dir.mkdir(parents=True, exist_ok=True)
+    ensure_local_git_exclude(repo)
 
     if not repo.tasks_path.exists():
         repo.tasks_path.write_text("[]\n", encoding="utf-8")
@@ -212,6 +217,19 @@ def ensure_relay_files(repo: RepoState) -> None:
         repo.diff_path.write_text("", encoding="utf-8")
     if not repo.config_path.exists():
         repo.config_path.write_text(json.dumps(default_config(), indent=2) + "\n", encoding="utf-8")
+
+
+def ensure_local_git_exclude(repo: RepoState) -> None:
+    if not repo.repo_root:
+        return
+    exclude_path = repo.repo_root / ".git" / "info" / "exclude"
+    if not exclude_path.exists():
+        return
+    existing_lines = exclude_path.read_text(encoding="utf-8").splitlines()
+    if any(line.strip() == ".relay/" for line in existing_lines):
+        return
+    updated = existing_lines + [".relay/"]
+    exclude_path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
 
 
 def load_repo_tasks(repo: RepoState) -> list[dict[str, Any]]:
@@ -316,6 +334,13 @@ def recent_rate_limit(tasks: list[dict[str, Any]], agent: str) -> bool:
 
 def latest_task(tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
     return tasks[-1] if tasks else None
+
+
+def latest_agent_task(tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for entry in reversed(tasks):
+        if entry.get("command_type") in {None, "task"}:
+            return entry
+    return None
 
 
 def score_matches(text: str, values: list[str]) -> list[str]:
@@ -450,6 +475,21 @@ def changed_files(repo: RepoState) -> list[str]:
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
+def git_status_lines(repo: RepoState) -> list[str]:
+    output = git_output(repo, "status", "--short")
+    return [line.rstrip() for line in output.splitlines() if line.strip()]
+
+
+def status_changed_files(repo: RepoState) -> list[str]:
+    files: list[str] = []
+    for line in git_status_lines(repo):
+        path = line[3:] if len(line) > 3 else line
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        files.append(path.strip())
+    return files
+
+
 def diff_summary(repo: RepoState) -> str:
     output = git_output(repo, "diff", "--stat")
     return output.strip()
@@ -462,6 +502,74 @@ def warning_paths(files: list[str]) -> list[str]:
         if any(pattern in path for pattern in SENSITIVE_PATH_PATTERNS):
             warnings.append(path)
     return sorted(set(warnings))
+
+
+def suggest_commit_message(repo: RepoState, files: list[str]) -> str:
+    lowered = [path.lower() for path in files]
+    tasks = load_repo_tasks(repo) if repo.tasks_path and repo.tasks_path.exists() else []
+    last = latest_agent_task(tasks)
+    last_task_text = (last or {}).get("original_task", "").strip().lower()
+
+    if any(path.endswith("readme.md") or path == "readme.md" for path in lowered):
+        return "Improve README clarity"
+    if any(path.endswith((".lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock")) for path in lowered):
+        return "Update dependencies"
+    if any("migration" in path for path in lowered):
+        return "Update database migrations"
+    if any("api/" in path or path.startswith("api/") for path in lowered):
+        return "Update API logic"
+    if any("test" in path for path in lowered):
+        return "Update tests"
+    if any(path.endswith((".css", ".scss", ".tsx", ".jsx", ".html")) for path in lowered):
+        return "Update UI files"
+    if "readme" in last_task_text:
+        return "Improve README clarity"
+    if "validation" in last_task_text:
+        return "Add validation improvements"
+    if "layout" in last_task_text or "dashboard" in last_task_text:
+        return "Update dashboard layout"
+    if last_task_text:
+        words = [word for word in re.findall(r"[a-zA-Z0-9]+", last_task_text) if word]
+        if words:
+            return trim_words(" ".join(word.capitalize() if index == 0 else word for index, word in enumerate(words)), 6)
+    if len(files) == 1:
+        stem = Path(files[0]).stem.replace("-", " ").replace("_", " ").strip()
+        if stem:
+            return f"Update {stem}"
+    return "Update project files"
+
+
+def prompt_confirmation(message: str) -> bool:
+    try:
+        response = input(f"{message} [y/N]: ").strip().lower()
+    except EOFError:
+        return False
+    return response in {"y", "yes"}
+
+
+def current_branch(repo: RepoState) -> str:
+    return git_output(repo, "branch", "--show-current").strip()
+
+
+def remote_origin_url(repo: RepoState) -> str:
+    return git_output(repo, "remote", "get-url", "origin").strip()
+
+
+def latest_commit_hash(repo: RepoState) -> str:
+    return git_output(repo, "rev-parse", "--short", "HEAD").strip()
+
+
+def latest_commit_message(repo: RepoState) -> str:
+    return git_output(repo, "log", "-1", "--pretty=%s").strip()
+
+
+def has_uncommitted_changes(repo: RepoState) -> bool:
+    return bool(git_status_lines(repo))
+
+
+def append_history_entry(repo: RepoState, entry: dict[str, Any]) -> None:
+    entry.setdefault("timestamp", timestamp_now())
+    append_repo_task(repo, entry)
 
 
 def build_agent_command(agent: str, prompt: str) -> list[str]:
@@ -547,6 +655,7 @@ def task_entry(
     handoff_summary: str,
 ) -> dict[str, Any]:
     return {
+        "command_type": "task",
         "timestamp": timestamp_now(),
         "original_task": original_task,
         "final_prompt_type": prompt_type,
@@ -581,6 +690,8 @@ def print_relay_home(repo: RepoState) -> None:
     print('relay continue "task"')
     print("relay review")
     print("relay summary")
+    print("relay commit")
+    print("relay push")
     print('relay why "task"')
     print("relay doctor")
     print("relay status")
@@ -645,7 +756,13 @@ def print_status(repo: RepoState) -> int:
     print("Recent Codex rate-limit detected: " + ("yes" if recent_rate_limit(tasks, "codex") else "no"))
     if last:
         status = "success" if last.get("success") else "failed"
-        print(f"Last task: {normalize_agent_name(last.get('selected_agent', 'codex'))} / {status}")
+        command_type = last.get("command_type", "task")
+        if command_type == "commit":
+            print(f"Last task: commit / {status}")
+        elif command_type == "push":
+            print(f"Last task: push / {status}")
+        else:
+            print(f"Last task: {normalize_agent_name(last.get('selected_agent', 'codex'))} / {status}")
     else:
         print("Last task: none")
     return 0
@@ -873,9 +990,141 @@ def run_summary(repo: RepoState) -> int:
     print()
     print("Suggested commit message")
     if last:
-        print(f"- {last.get('selected_agent', 'codex')}: {trim_words(last.get('original_task', 'update project'), 12)}")
+        if last.get("command_type") == "commit":
+            print(f"- commit: {trim_words(last.get('commit_message', 'update project files'), 12)}")
+        elif last.get("command_type") == "push":
+            print(f"- push: {trim_words(last.get('commit_hash', 'latest commit'), 12)}")
+        else:
+            print(f"- {last.get('selected_agent', 'codex')}: {trim_words(last.get('original_task', 'update project'), 12)}")
     else:
         print("- update project changes")
+    return 0
+
+
+def run_commit(repo: RepoState) -> int:
+    if not cli_available("git"):
+        raise RelayError("Relay commit requires git.")
+    if not repo.in_git_repo:
+        raise RelayError("Relay commit requires running inside a git repository.")
+
+    ensure_relay_files(repo)
+    status_lines = git_status_lines(repo)
+    if not status_lines:
+        print("No changes to commit.")
+        return 0
+
+    files = status_changed_files(repo)
+    warnings = warning_paths(files)
+    if len(files) > 20:
+        warnings.append("more than 20 files changed")
+    message = suggest_commit_message(repo, files) or "Update project files"
+
+    print("Commit")
+    print("Changed files:")
+    for path in files:
+        print(f"- {path}")
+    if warnings:
+        print()
+        print("Warnings")
+        for item in warnings:
+            print(f"- {item}")
+    print()
+    print("Suggested commit message")
+    print(f"- {message}")
+
+    if not prompt_confirmation("Commit these changes?"):
+        print("Commit cancelled.")
+        return 0
+
+    add_result = run_command(["git", "add", "."], cwd=repo.repo_root)
+    if add_result.returncode != 0:
+        raise RelayError(add_result.stderr.strip() or "git add failed.")
+
+    commit_result = run_command(["git", "commit", "-m", message], cwd=repo.repo_root)
+    success = commit_result.returncode == 0
+    if commit_result.stdout.strip():
+        print(commit_result.stdout.strip())
+    if not success and commit_result.stderr.strip():
+        print(commit_result.stderr.strip(), file=sys.stderr)
+
+    append_history_entry(
+        repo,
+        {
+            "command_type": "commit",
+            "commit_message": message,
+            "changed_files": files,
+            "success": success,
+        },
+    )
+
+    if not success:
+        return commit_result.returncode
+    print("Commit complete.")
+    return 0
+
+
+def run_push(repo: RepoState) -> int:
+    if not cli_available("git"):
+        raise RelayError("Relay push requires git.")
+    if not repo.in_git_repo:
+        raise RelayError("Relay push requires running inside a git repository.")
+
+    ensure_relay_files(repo)
+    remote = remote_origin_url(repo)
+    if not remote:
+        print("No remote origin found. Add one with: git remote add origin <url>")
+        return 0
+
+    if has_uncommitted_changes(repo):
+        print("You have uncommitted changes. Run relay commit first.")
+        return 0
+
+    branch = current_branch(repo)
+    commit_hash = latest_commit_hash(repo)
+    commit_message = latest_commit_message(repo)
+
+    print("Push")
+    print(f"Remote: {remote}")
+    print(f"Branch: {branch or 'unknown'}")
+    print(f"Latest commit: {commit_hash or 'unknown'}")
+    print(f"Latest message: {commit_message or 'unknown'}")
+
+    if not prompt_confirmation("Push this branch?"):
+        print("Push cancelled.")
+        return 0
+
+    push_result = run_command(["git", "push"], cwd=repo.repo_root)
+    success = push_result.returncode == 0
+    combined_output = "\n".join(part for part in [push_result.stdout.strip(), push_result.stderr.strip()] if part)
+
+    if not success and ("no upstream branch" in combined_output.lower() or "has no upstream branch" in combined_output.lower()):
+        suggested = ["git", "push", "-u", "origin", branch]
+        print(f"Upstream is missing. Suggested command: {' '.join(suggested)}")
+        if prompt_confirmation("Push and set upstream?"):
+            push_result = run_command(suggested, cwd=repo.repo_root)
+            success = push_result.returncode == 0
+            combined_output = "\n".join(part for part in [push_result.stdout.strip(), push_result.stderr.strip()] if part)
+        else:
+            print("Push cancelled.")
+            return 0
+
+    if combined_output:
+        print(combined_output)
+
+    append_history_entry(
+        repo,
+        {
+            "command_type": "push",
+            "remote": remote,
+            "branch": branch,
+            "commit_hash": commit_hash,
+            "success": success,
+        },
+    )
+
+    if not success:
+        return push_result.returncode
+    print("Push complete.")
     return 0
 
 
@@ -891,14 +1140,29 @@ def print_history(repo: RepoState) -> int:
 
     for entry in reversed(tasks[-MAX_HISTORY_DISPLAY:]):
         status = "ok" if entry.get("success") else "failed"
-        rate_flag = "yes" if entry.get("rate_limit_detected") else "no"
-        changed_count = len(entry.get("changed_files", []))
-        print(
-            f"{entry.get('timestamp')} | "
-            f"{normalize_agent_name(entry.get('selected_agent', 'codex')):<6} | "
-            f"{status:<6} | files={changed_count:<2} | rate-limit={rate_flag:<3} | "
-            f"{entry.get('original_task', '')}"
-        )
+        command_type = entry.get("command_type", "task")
+        if command_type == "commit":
+            changed_count = len(entry.get("changed_files", []))
+            print(
+                f"{entry.get('timestamp')} | "
+                f"{'commit':<6} | {status:<6} | files={changed_count:<2} | "
+                f"{entry.get('commit_message', '')}"
+            )
+        elif command_type == "push":
+            print(
+                f"{entry.get('timestamp')} | "
+                f"{'push':<6} | {status:<6} | "
+                f"{entry.get('remote', '')} {entry.get('branch', '')} {entry.get('commit_hash', '')}"
+            )
+        else:
+            rate_flag = "yes" if entry.get("rate_limit_detected") else "no"
+            changed_count = len(entry.get("changed_files", []))
+            print(
+                f"{entry.get('timestamp')} | "
+                f"{normalize_agent_name(entry.get('selected_agent', 'codex')):<6} | "
+                f"{status:<6} | files={changed_count:<2} | rate-limit={rate_flag:<3} | "
+                f"{entry.get('original_task', '')}"
+            )
     return 0
 
 
@@ -914,6 +1178,8 @@ def usage() -> int:
     print('  relay continue "task"')
     print("  relay review")
     print("  relay summary")
+    print("  relay commit")
+    print("  relay push")
     print("  relay history")
     return 1
 
@@ -923,7 +1189,7 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
         return "home", None
 
     command = argv[0]
-    if command in {"doctor", "status", "review", "summary", "history"}:
+    if command in {"doctor", "status", "review", "summary", "history", "commit", "push"}:
         return command, None
 
     if command == "why":
@@ -974,6 +1240,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_review(repo)
         if command == "summary":
             return run_summary(repo)
+        if command == "commit":
+            return run_commit(repo)
+        if command == "push":
+            return run_push(repo)
         if command == "history":
             return print_history(repo)
         if command == "@claude":
