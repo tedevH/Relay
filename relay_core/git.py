@@ -89,94 +89,32 @@ def has_uncommitted_changes(repo: RepoState) -> bool:
 
 
 def exec_agent(agent: str, prompt: str, cwd: Path) -> None:
-    """Launch Claude or Codex in native interactive mode and auto-type the task.
+    """Replace the current Relay process with Claude or Codex natively.
 
-    Uses pty.fork() so the agent gets a real terminal (full streaming UI,
-    native look and feel). Watches the output for the agent's input prompt,
-    then writes the task automatically — user doesn't have to paste anything.
+    Uses os.execvp — Relay is completely replaced by the agent process.
+    The agent runs exactly as if the user typed 'claude' or 'codex' themselves:
+    full streaming UI, full terminal control, nothing intercepted.
 
-    Claude prompt indicator: ❯  (U+276F, UTF-8: e2 9d af)
-    Codex prompt indicator:  >
+    The task is copied to the clipboard. User presses Cmd+V (Mac) or Ctrl+Shift+V
+    (Linux) to paste it into the agent's input prompt.
     """
-    import select
-    import sys
-    import time
+    import subprocess as _sp
 
-    os.chdir(str(cwd))
-
-    if agent == "claude":
-        command = ["claude", "--permission-mode", "acceptEdits"]
-        # ❯ is Claude's input caret — signals it's ready for input
-        prompt_bytes = "❯".encode("utf-8")
-    else:
-        command = ["codex"]
-        prompt_bytes = b"> "
-
+    # Copy task to clipboard
     try:
-        import pty
-        pid, master_fd = pty.fork()
-    except (ImportError, OSError):
-        # PTY not available — fall back to plain exec (user pastes manually)
-        os.execvp(command[0], command)
-        return  # never reached
-
-    if pid == 0:
-        # Child — become the agent
+        _sp.run(["pbcopy"], input=prompt.encode(), check=False)
+    except FileNotFoundError:
         try:
-            os.execvp(command[0], command)
-        except Exception:
-            os._exit(1)
-
-    # Parent — bridge PTY ↔ real terminal, auto-type task on prompt detection.
-    # Do NOT set raw mode — the PTY slave manages its own terminal settings.
-    # Raw mode on the parent corrupts output (prints each byte on its own line).
-    task_sent = False
-    buf = b""
-
-    try:
-        while True:
-            try:
-                r, _, _ = select.select([master_fd, sys.stdin], [], [], 0.05)
-            except (ValueError, OSError):
-                break
-
-            if master_fd in r:
-                try:
-                    data = os.read(master_fd, 4096)
-                    if not data:
-                        break
-                    os.write(sys.stdout.fileno(), data)
-                    sys.stdout.flush()
-
-                    if not task_sent:
-                        buf += data
-                        buf = buf[-512:]  # keep only recent bytes
-                        if prompt_bytes in buf:
-                            time.sleep(0.05)
-                            os.write(master_fd, prompt.encode("utf-8") + b"\n")
-                            task_sent = True
-                            buf = b""
-                except OSError:
-                    break
-
-            if sys.stdin in r:
-                try:
-                    data = os.read(sys.stdin.fileno(), 4096)
-                    if data:
-                        os.write(master_fd, data)
-                except OSError:
-                    break
-
-    finally:
-        try:
-            os.close(master_fd)
-        except OSError:
+            _sp.run(["xclip", "-selection", "clipboard"],
+                    input=prompt.encode(), check=False)
+        except FileNotFoundError:
             pass
 
-    try:
-        os.waitpid(pid, 0)
-    except ChildProcessError:
-        pass
+    os.chdir(str(cwd))
+    if agent == "claude":
+        os.execvp("claude", ["claude", "--permission-mode", "acceptEdits"])
+    else:
+        os.execvp("codex", ["codex"])
 
 
 def capture_agent_output(agent: str, prompt: str, cwd: Path) -> tuple[int, str]:

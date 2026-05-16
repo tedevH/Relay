@@ -526,7 +526,7 @@ def show_handoff_note(agent: str, task: str) -> None:
     console.print()
     console.print(Panel(
         f"[dim]Task →[/dim] [bold white]{task}[/bold white]\n"
-        f"[dim]Relay will type it automatically when {name} is ready.[/dim]",
+        f"[dim]Copied to clipboard. Press[/dim] [bold white]⌘V[/bold white] [dim]to paste when {name} opens.[/dim]",
         title=f"[{color}]Opening {name}[/{color}]",
         border_style=color.replace("bold ", ""),
         padding=(0, 1),
