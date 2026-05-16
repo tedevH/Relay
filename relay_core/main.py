@@ -9,7 +9,7 @@ from relay_core.memory import load_repo_tasks, recent_rate_limit, load_config
 from relay_core.constants import ALL_COMMANDS, MAX_HISTORY_DISPLAY
 import relay_core.tui as tui
 from relay_core.commands import (
-    run_main_task, run_continue, run_review, run_summary,
+    run_main_task, run_continue, run_review, run_ai_review, run_summary,
     run_commit, run_push, run_scan, run_config, run_dashboard, run_audit,
 )
 
@@ -25,6 +25,8 @@ def _dispatch(command: str, value: str | None, repo: RepoState) -> int:
         return run_continue(value or "", repo)
     if command == "review":
         return run_review(repo)
+    if command == "ai-review":
+        return run_ai_review(repo)
     if command == "summary":
         return run_summary(repo)
     if command == "commit":
@@ -63,7 +65,7 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
     }
     command = alias_map.get(command, command)
 
-    parameterless = {"doctor", "status", "review", "summary", "history", "commit", "push", "scan", "config", "dashboard", "interactive"}
+    parameterless = {"doctor", "status", "review", "ai-review", "summary", "history", "commit", "push", "scan", "config", "dashboard", "interactive"}
     if command in parameterless:
         return command, None
 

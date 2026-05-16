@@ -228,6 +228,61 @@ def run_continue(task: str, repo: RepoState) -> int:
 
 
 def run_review(repo: RepoState) -> int:
+    """Instant local review — no AI, no tokens, no waiting.
+    Uses diff intelligence already built in: risk classification,
+    contradiction detection, pattern checks, commit suggestion.
+    Run 'relay ai-review' for a deep AI-powered review.
+    """
+    if not cli_available("git"):
+        raise RelayError("Relay review requires git.")
+    if not repo.in_git_repo:
+        raise RelayError("Relay review requires running inside a git repository.")
+
+    diff_text = current_diff(repo)
+    if not diff_text.strip():
+        tui.show_info("No changes to review.")
+        return 0
+
+    files = changed_files(repo)
+    risk_levels = classify_files_risk(files)
+    warnings = warning_paths(files)
+    if len(files) > 20:
+        warnings.append("more than 20 files changed — large diff, review carefully")
+    contradictions = detect_contradictions(files, diff_text)
+    commit_msg = smart_commit_message(files, diff_text)
+    stat = diff_summary(repo)
+
+    # Additional local checks
+    extra_findings: list[str] = []
+    diff_lower = diff_text.lower()
+    if "todo" in diff_lower or "fixme" in diff_lower or "hack" in diff_lower:
+        extra_findings.append("TODO / FIXME / HACK found in diff — intentional?")
+    if "console.log" in diff_lower or "print(" in diff_lower:
+        extra_findings.append("Debug statements (console.log / print) found in diff")
+    if "hardcode" in diff_lower or "password" in diff_lower or "secret" in diff_lower:
+        extra_findings.append("Possible hardcoded secret or credential in diff")
+    added_lines = sum(1 for l in diff_text.splitlines() if l.startswith("+") and not l.startswith("+++"))
+    removed_lines = sum(1 for l in diff_text.splitlines() if l.startswith("-") and not l.startswith("---"))
+    if added_lines > 300:
+        extra_findings.append(f"Large diff: {added_lines} lines added — consider splitting into smaller commits")
+
+    tui.show_local_review(
+        files=files,
+        risk_levels=risk_levels,
+        warnings=warnings,
+        contradictions=contradictions,
+        extra_findings=extra_findings,
+        commit_msg=commit_msg,
+        stat=stat,
+        added=added_lines,
+        removed=removed_lines,
+    )
+    tui.show_info("Run 'relay ai-review' for a deep AI-powered review.")
+    return 0
+
+
+def run_ai_review(repo: RepoState) -> int:
+    """Deep AI-powered review using the opposite agent. Uses tokens — run selectively."""
     require_task_dependencies(repo)
     ensure_relay_files(repo)
     diff_text = current_diff(repo)
@@ -244,12 +299,12 @@ def run_review(repo: RepoState) -> int:
     prompt = (
         "Review this git diff for bugs, broken logic, missing tests, security risks, "
         "risky file changes, and unnecessary edits. Do not rewrite code unless asked. "
-        "Return concise findings.\n\n"
+        "Return concise, numbered findings only.\n\n"
         f"Changed files: {', '.join(files) or 'none'}\n\n"
         f"Diff:\n{diff_text[:MAX_DIFF_PROMPT_CHARS]}"
     )
     return execute_agent_run(
-        repo=repo, user_task="Review current git diff",
+        repo=repo, user_task="Deep AI review of current git diff",
         prompt=prompt, prompt_type="review",
         forced_agent=forced_agent,
         extra_context="review " + " ".join(files),

@@ -49,7 +49,8 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
     commands = [
         ('relay "task"', "auto-route task to Claude or Codex"),
         ("relay chain \"task\"", "design → build → review pipeline"),
-        ("relay review  (r)", "review current diff with opposite agent"),
+        ("relay review  (r)", "instant local review — risk, findings, commit msg"),
+        ("relay ai-review", "deep AI review — uses tokens, run selectively"),
         ("relay summary (s)", "smart diff summary with risk levels"),
         ("relay commit  (c)", "safe commit with confirmation"),
         ("relay push    (p)", "safe push with confirmation"),
@@ -427,6 +428,56 @@ def show_config(config: dict) -> None:
 def json_inline(d: dict) -> str:
     parts = [f"{k}: {v}" for k, v in list(d.items())[:4]]
     return "  ".join(parts) or "[dim]{}[/dim]"
+
+
+def show_local_review(
+    files: list[str],
+    risk_levels: dict[str, str],
+    warnings: list[str],
+    contradictions: list[str],
+    extra_findings: list[str],
+    commit_msg: str,
+    stat: str,
+    added: int,
+    removed: int,
+) -> None:
+    """Instant local review panel — no AI, no tokens."""
+    from rich.table import Table
+    from rich import box
+
+    file_table = Table(box=box.SIMPLE, show_header=True, header_style="bold white", border_style="dim")
+    file_table.add_column("File")
+    file_table.add_column("Risk", justify="center", width=8)
+
+    has_high = any(r == "HIGH" for r in risk_levels.values())
+    for f in files:
+        risk = risk_levels.get(f, "LOW")
+        color = RISK_COLORS.get(risk, "white")
+        file_table.add_row(f"[dim]{f}[/dim]", Text(risk, style=color))
+
+    all_findings = warnings + contradictions + extra_findings
+    findings_text = Text()
+    if all_findings:
+        for finding in all_findings:
+            findings_text.append("⚠  ", style="bold yellow")
+            findings_text.append(finding + "\n", style="yellow")
+    else:
+        findings_text.append("✓  No issues detected", style="bold green")
+
+    stat_line = f"+{added} / -{removed} lines"
+    if stat:
+        stat_line += f"  ·  {stat.splitlines()[-1].strip()}" if stat.splitlines() else ""
+
+    summary = Text()
+    summary.append(f"  {stat_line}\n", style="dim")
+    summary.append(f"  Suggested commit: ", style="dim white")
+    summary.append(commit_msg, style="bold cyan")
+
+    border = "red" if has_high else ("yellow" if all_findings else "green")
+    console.print()
+    console.print(Panel(file_table, title="[bold white]⚡ Local Review[/bold white]", border_style=border, padding=(0, 1)))
+    console.print(Panel(findings_text, title="[bold white]Findings[/bold white]", border_style=border, padding=(0, 1)))
+    console.print(Panel(summary, title="[bold white]Diff Stats[/bold white]", border_style="dim", padding=(0, 1)))
 
 
 def show_review_output(agent: str, output: str, exit_code: int) -> None:
