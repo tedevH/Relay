@@ -94,19 +94,30 @@ def build_agent_command(agent: str, prompt: str) -> list[str]:
 
 
 def stream_subprocess(command: list[str], cwd: Path, quiet: bool = False) -> tuple[int, str]:
-    """Run a subprocess and stream its output.
+    """Run a subprocess.
 
-    quiet=True: suppress all live output, just capture and return.
-                Used for review/audit where output is shown in a panel afterward.
-    quiet=False: stream each line live with a spinner shown while waiting.
+    quiet=False (default, normal tasks):
+        Runs the agent with full terminal control — no capturing, no piping.
+        Claude Code and Codex show their native UI exactly as if you ran them
+        directly: live thinking steps, tool calls, spinners, everything.
+        Output is NOT captured (we read the git diff afterward instead).
+
+    quiet=True (review/audit):
+        Captures output silently and returns it for display in a Rich panel.
+        Used when we need to process and reformat the output.
     """
+    if not quiet:
+        # Full passthrough — give the agent a real terminal, zero interference.
+        # This is what makes Claude Code show its native thinking UI.
+        result = subprocess.run(command, cwd=str(cwd))
+        return result.returncode, ""
+
+    # quiet=True: capture output for panel display (review / audit)
     import threading
     import time
-
     from rich.live import Live
-    from rich.spinner import Spinner
     from rich.text import Text
-    from relay_core.tui import console, stream_line
+    from relay_core.tui import console
 
     process = subprocess.Popen(
         command,
@@ -130,28 +141,14 @@ def stream_subprocess(command: list[str], cwd: Path, quiet: bool = False) -> tup
     reader.start()
 
     start = time.time()
-    last_idx = 0
     agent_name = "Claude" if "claude" in command[0] else "Codex"
 
     with Live(console=console, refresh_per_second=10) as live:
-        while not reading_done.is_set() or last_idx < len(output_lines):
-            # Drain new lines
-            while last_idx < len(output_lines):
-                line = output_lines[last_idx].rstrip()
-                last_idx += 1
-                if not quiet and line:
-                    live.console.print(line, highlight=False, markup=False)
-
+        while not reading_done.is_set():
             elapsed = int(time.time() - start)
-            if not reading_done.is_set():
-                live.update(
-                    Text(f"  ⏳ {agent_name} is running... {elapsed}s", style="dim")
-                )
-            else:
-                live.update(Text(""))
-
-            if not reading_done.is_set():
-                time.sleep(0.1)
+            live.update(Text(f"  ⏳ {agent_name} is thinking... {elapsed}s", style="dim"))
+            time.sleep(0.1)
+        live.update(Text(""))
 
     reader.join()
     process.wait()

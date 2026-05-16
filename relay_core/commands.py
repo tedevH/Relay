@@ -148,20 +148,18 @@ def execute_agent_run(
     command = build_agent_command(agent, prompt)
 
     tui.show_routing_decision(decision)
-    tui.show_agent_running(command)
 
-    # review/audit: run quietly and show output in a clean panel
+    # review/audit: capture output silently, show in a clean panel.
+    # normal tasks: full passthrough — agent runs with native terminal UI,
+    #               showing its own thinking, tool calls, and live output.
     quiet_mode = prompt_type in {"review", "chain-review", "audit"}
     exit_code, output = stream_subprocess(command, cwd=repo.repo_root or repo.cwd, quiet=quiet_mode)
 
     if quiet_mode:
         tui.show_review_output(agent, output, exit_code)
-    else:
-        tui.show_agent_completion_note(agent, output, exit_code)
 
-    rate_limited = detect_rate_limit(output)
-    if rate_limited:
-        tui.show_warnings(["Rate limit or usage limit detected from agent output."])
+    # Rate limit detection only possible when we captured output
+    rate_limited = detect_rate_limit(output) if quiet_mode else False
 
     files = changed_files(repo)
     diff_text = current_diff(repo)
