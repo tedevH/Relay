@@ -124,15 +124,27 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
         return result.returncode
 
     else:
-        # Codex: resume previous session if we have a saved ID
+        # Codex: use exec mode so it auto-exits when the task is done.
+        # Resume previous session if available so it has prior context.
+        # exec mode = non-interactive, runs task and exits cleanly.
         session_id = _load_codex_session(relay_dir)
-        if session_id:
-            command = ["codex", "resume", session_id]
-        else:
-            command = ["codex"]
 
-        # Use script to record output so we can extract the new session ID
-        # while still showing the full terminal UI to the user
+        if session_id:
+            # Resume session context + exec mode for auto-exit
+            command = [
+                "codex", "resume", session_id,
+                "--ask-for-approval", "never",
+                "exec", "--sandbox", "workspace-write", prompt,
+            ]
+        else:
+            # Fresh session in exec mode
+            command = [
+                "codex",
+                "--ask-for-approval", "never",
+                "exec", "--sandbox", "workspace-write", prompt,
+            ]
+
+        # Record output to capture new session ID for next run
         import tempfile, platform
         session_log = None
         if platform.system() in ("Darwin", "Linux"):
@@ -140,16 +152,14 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
                 tf = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
                 session_log = tf.name
                 tf.close()
-                result = subprocess.run(
-                    ["script", "-q", session_log] + command,
-                )
+                result = subprocess.run(["script", "-q", session_log] + command)
             except Exception:
                 session_log = None
                 result = subprocess.run(command)
         else:
             result = subprocess.run(command)
 
-        # Extract and save new session ID from the log
+        # Save new session ID for next run
         if session_log and relay_dir:
             try:
                 with open(session_log, "rb") as f:
