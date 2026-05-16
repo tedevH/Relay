@@ -87,23 +87,36 @@ def has_uncommitted_changes(repo: RepoState) -> bool:
     return bool(git_status_lines(repo))
 
 
-def build_agent_command(agent: str, prompt: str) -> list[str]:
+def build_agent_command(agent: str, prompt: str, interactive: bool = False) -> tuple[list[str], str]:
+    """Return (command, stdin_prompt).
+
+    interactive=True (normal tasks via PTY):
+      Claude: run without -p so it streams tokens live; prompt sent via stdin.
+      Codex:  prompt stays as a CLI arg (Codex always streams its own UI).
+
+    interactive=False (review/audit quiet capture):
+      Both agents use -p / arg prompt so output can be captured and processed.
+    """
     if agent == "claude":
-        return ["claude", "--permission-mode", "acceptEdits", "-p", prompt]
-    return ["codex", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", prompt]
+        if interactive:
+            return ["claude", "--permission-mode", "acceptEdits"], prompt
+        return ["claude", "--permission-mode", "acceptEdits", "-p", prompt], ""
+    # Codex takes the prompt as a positional arg regardless
+    return ["codex", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", prompt], ""
 
 
-def _run_with_pty(command: list[str], cwd: Path) -> int:
-    """Run command inside a pseudo-terminal so it gets a real interactive TTY.
+def _run_with_pty(command: list[str], cwd: Path, stdin_prompt: str = "") -> int:
+    """Run command inside a PTY so the agent sees a real interactive terminal.
 
-    Without a PTY, Claude Code detects it's not in a terminal and switches to
-    plain print mode — no thinking steps, no tool calls, output only at the end.
-    With a PTY it behaves exactly as if the user typed the command themselves.
+    stdin_prompt: if set, written to the agent's stdin once it has started up.
+    This is how Claude receives its task in interactive (non -p) mode, which
+    makes it stream tokens live word-by-word as they arrive from the API.
     """
     import os
     import select
     import sys
     import termios
+    import time
     import tty
 
     try:
@@ -130,6 +143,10 @@ def _run_with_pty(command: list[str], cwd: Path) -> int:
     except Exception:
         pass
 
+    prompt_sent = not bool(stdin_prompt)
+    prompt_bytes = (stdin_prompt.strip() + "\n").encode() if stdin_prompt else b""
+    bytes_received = 0
+
     try:
         while True:
             try:
@@ -143,6 +160,13 @@ def _run_with_pty(command: list[str], cwd: Path) -> int:
                     if data:
                         os.write(sys.stdout.fileno(), data)
                         sys.stdout.flush()
+                        bytes_received += len(data)
+                        # Once Claude has printed its startup banner, send the task.
+                        # We wait for >50 bytes so Claude is fully ready to accept input.
+                        if not prompt_sent and bytes_received > 50:
+                            time.sleep(0.05)
+                            os.write(master_fd, prompt_bytes)
+                            prompt_sent = True
                 except OSError:
                     break  # child exited
 
@@ -172,7 +196,7 @@ def _run_with_pty(command: list[str], cwd: Path) -> int:
         return 0
 
 
-def stream_subprocess(command: list[str], cwd: Path, quiet: bool = False) -> tuple[int, str]:
+def stream_subprocess(command: list[str], cwd: Path, quiet: bool = False, **kwargs: str) -> tuple[int, str]:
     """Run a subprocess.
 
     quiet=False (default, normal tasks):
@@ -187,9 +211,9 @@ def stream_subprocess(command: list[str], cwd: Path, quiet: bool = False) -> tup
     """
     if not quiet:
         # Run inside a PTY so the agent sees a real interactive terminal.
-        # This is what makes Claude Code show its native thinking UI —
-        # live tool calls, file reads, spinners — exactly as if run directly.
-        return _run_with_pty(command, cwd), ""
+        # stdin_prompt is the task text for Claude interactive mode (no -p).
+        stdin_prompt = kwargs.get("stdin_prompt", "")
+        return _run_with_pty(command, cwd, stdin_prompt=stdin_prompt), ""
 
     # quiet=True: capture output for panel display (review / audit)
     import threading

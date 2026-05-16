@@ -145,15 +145,21 @@ def execute_agent_run(
 
     decision = route_task(user_task, repo, forced_agent=forced_agent, extra_context=extra_context)
     agent = decision.agent
-    command = build_agent_command(agent, prompt)
+    quiet_mode = prompt_type in {"review", "chain-review", "audit"}
+
+    # For normal tasks: Claude runs without -p (interactive mode) so it streams
+    # tokens live. Prompt is sent via PTY stdin after Claude starts up.
+    # For review/audit: -p mode is fine since we capture and reformat anyway.
+    command, stdin_prompt = build_agent_command(agent, prompt, interactive=not quiet_mode)
 
     tui.show_routing_decision(decision)
 
-    # review/audit: capture output silently, show in a clean panel.
-    # normal tasks: full passthrough — agent runs with native terminal UI,
-    #               showing its own thinking, tool calls, and live output.
-    quiet_mode = prompt_type in {"review", "chain-review", "audit"}
-    exit_code, output = stream_subprocess(command, cwd=repo.repo_root or repo.cwd, quiet=quiet_mode)
+    exit_code, output = stream_subprocess(
+        command,
+        cwd=repo.repo_root or repo.cwd,
+        quiet=quiet_mode,
+        stdin_prompt=stdin_prompt,
+    )
 
     if quiet_mode:
         tui.show_review_output(agent, output, exit_code)

@@ -102,6 +102,7 @@ def _run_agent_capture(repo: RepoState, agent: str, prompt: str) -> tuple[int, s
     if missing:
         raise RelayError("Missing dependencies: " + ", ".join(missing))
 
-    command = build_agent_command(agent, prompt)
+    # Chain design step uses quiet capture so we can read the spec output
+    command, _ = build_agent_command(agent, prompt, interactive=False)
     cwd = repo.repo_root or repo.cwd
-    return stream_subprocess(command, cwd)
+    return stream_subprocess(command, cwd, quiet=True)
