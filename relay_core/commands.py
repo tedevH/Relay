@@ -71,8 +71,10 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     from relay_core.hooks import save_pending_task
     save_pending_task(repo, task, agent)
 
-    # Inject context into CLAUDE.md-adjacent file so the agent has project memory
+    # Update CLAUDE.md and context.md before handing off so Claude reads
+    # project memory immediately without exploring the codebase first
     _inject_context(repo, task)
+    _update_claude_md(repo)
 
     cwd = repo.repo_root or repo.cwd
     tui.show_handoff_note(agent, task)
@@ -132,6 +134,54 @@ def _inject_context(repo: RepoState, task: str) -> None:
 
     context_path = repo.relay_dir / "context.md"
     context_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _update_claude_md(repo: RepoState) -> None:
+    """Write or update CLAUDE.md at the repo root so Claude reads project
+    memory automatically on every session — no codebase exploration needed.
+
+    Only writes the Relay section. If CLAUDE.md already exists with other
+    content, the Relay section is appended or updated in-place.
+    """
+    if not repo.repo_root or not repo.relay_dir:
+        return
+
+    claude_md = repo.repo_root / "CLAUDE.md"
+    relay_section = f"""## Relay Memory
+
+This project uses Relay for AI-assisted development tracking.
+Read `.relay/context.md` before starting any task — it contains:
+- The current task description
+- Recent activity on this repo
+- Most frequently modified files and their risk levels
+- Known risk flags from previous sessions
+
+File structure:
+- `relay_core/` — CLI engine (routing, commands, git, memory, TUI)
+- `relay_dashboard/` — local web dashboard (Flask + HTML/CSS/JS)
+- `relay_ci/` — CI audit tooling
+- `.relay/` — local memory (tasks, diffs, context, config)
+
+Always check `.relay/context.md` first. It saves you from exploring files you already know about.
+"""
+
+    if claude_md.exists():
+        existing = claude_md.read_text(encoding="utf-8")
+        if "## Relay Memory" in existing:
+            # Update existing Relay section
+            import re
+            updated = re.sub(
+                r"## Relay Memory.*?(?=\n## |\Z)",
+                relay_section.strip(),
+                existing,
+                flags=re.DOTALL,
+            )
+            claude_md.write_text(updated, encoding="utf-8")
+        else:
+            # Append Relay section
+            claude_md.write_text(existing.rstrip() + "\n\n" + relay_section, encoding="utf-8")
+    else:
+        claude_md.write_text(relay_section, encoding="utf-8")
 
 
 # ── Review commands ───────────────────────────────────────────────────────────
