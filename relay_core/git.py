@@ -100,9 +100,7 @@ def exec_agent(agent: str, prompt: str, cwd: Path) -> None:
     """
     import select
     import sys
-    import termios
     import time
-    import tty
 
     os.chdir(str(cwd))
 
@@ -129,14 +127,9 @@ def exec_agent(agent: str, prompt: str, cwd: Path) -> None:
         except Exception:
             os._exit(1)
 
-    # Parent — bridge PTY ↔ real terminal, auto-type task on prompt detection
-    old_settings = None
-    try:
-        old_settings = termios.tcgetattr(sys.stdin.fileno())
-        tty.setraw(sys.stdin.fileno())
-    except Exception:
-        pass
-
+    # Parent — bridge PTY ↔ real terminal, auto-type task on prompt detection.
+    # Do NOT set raw mode — the PTY slave manages its own terminal settings.
+    # Raw mode on the parent corrupts output (prints each byte on its own line).
     task_sent = False
     buf = b""
 
@@ -157,10 +150,8 @@ def exec_agent(agent: str, prompt: str, cwd: Path) -> None:
 
                     if not task_sent:
                         buf += data
-                        # Keep only last 512 bytes to avoid unbounded growth
-                        buf = buf[-512:]
+                        buf = buf[-512:]  # keep only recent bytes
                         if prompt_bytes in buf:
-                            # Small delay so the prompt renders fully
                             time.sleep(0.05)
                             os.write(master_fd, prompt.encode("utf-8") + b"\n")
                             task_sent = True
@@ -177,11 +168,6 @@ def exec_agent(agent: str, prompt: str, cwd: Path) -> None:
                     break
 
     finally:
-        if old_settings:
-            try:
-                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
-            except Exception:
-                pass
         try:
             os.close(master_fd)
         except OSError:
