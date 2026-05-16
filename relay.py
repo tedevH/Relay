@@ -604,6 +604,22 @@ def stream_subprocess(command: list[str], cwd: Path) -> tuple[int, str]:
     return process.returncode, "".join(captured)
 
 
+def print_agent_completion_note(agent: str, output: str, exit_code: int) -> None:
+    if output.strip():
+        return
+    print()
+    if exit_code == 0:
+        print(
+            f"{normalize_agent_name(agent)} finished without printing a terminal message. "
+            "If you expected an edit, check the diff or changed files below."
+        )
+    else:
+        print(
+            f"{normalize_agent_name(agent)} finished without printing a terminal message. "
+            "Check the exit code and current diff below for clues."
+        )
+
+
 def compact_diff_for_prompt(repo: RepoState) -> str:
     diff_text = current_diff(repo)
     if not diff_text.strip():
@@ -838,6 +854,7 @@ def execute_agent_run(
     print()
 
     exit_code, output = stream_subprocess(command, cwd=repo.repo_root or repo.cwd)
+    print_agent_completion_note(agent, output, exit_code)
     rate_limited = detect_rate_limit(output)
     if rate_limited:
         print("\nWarning: Relay detected likely rate-limit or usage-limit output.", file=sys.stderr)
