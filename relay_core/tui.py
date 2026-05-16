@@ -47,17 +47,17 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
     cmd_table.add_column(style="bold cyan", no_wrap=True)
     cmd_table.add_column(style="dim white")
     commands = [
-        ('relay "task"', "auto-route task to Claude or Codex"),
-        ("relay chain \"task\"", "design → build → review pipeline"),
+        ('relay "task"', "route to Claude or Codex — full native terminal handoff"),
+        ("relay init", "set up git hooks + memory for this repo"),
+        ("relay context", "show what Relay knows about this project"),
+        ("relay digest", "full project health report"),
         ("relay review  (r)", "instant local review — risk, findings, commit msg"),
         ("relay ai-review", "deep AI review — uses tokens, run selectively"),
-        ("relay summary (s)", "smart diff summary with risk levels"),
+        ("relay summary (s)", "diff summary with risk levels"),
         ("relay commit  (c)", "safe commit with confirmation"),
         ("relay push    (p)", "safe push with confirmation"),
         ("relay dashboard", "open web dashboard at localhost:7432"),
         ("relay why \"task\"", "explain routing without running"),
-        ("relay scan", "fingerprint project for smarter routing"),
-        ("relay audit", "CI-style review with risk exit codes"),
         ("relay history", "view recent task history"),
         ("relay doctor", "check environment and dependencies"),
     ]
@@ -515,6 +515,119 @@ def show_review_output(agent: str, output: str, exit_code: int) -> None:
         border_style=border,
         padding=(1, 2),
     ))
+
+
+def show_handoff_note(agent: str) -> None:
+    """Shown just before Relay hands off to Claude/Codex."""
+    from relay_core.utils import normalize_agent_name
+    name = normalize_agent_name(agent)
+    color = AGENT_COLORS.get(agent, "white")
+    console.print(f"\n[{color}]Handing off to {name}...[/{color}] [dim]Relay will log everything after you commit.[/dim]\n")
+
+
+def show_context(tasks: list[dict], mem: dict, profile: dict | None) -> None:
+    """Show Relay's accumulated project memory."""
+    from relay_core.diff import classify_file_risk
+
+    recent = [t for t in reversed(tasks[-20:]) if t.get("original_task") or t.get("commit_message")][:8]
+    hot_files = list(mem.get("hot_files", {}).items())[:10]
+    risk_flags = mem.get("last_risk_flags", [])
+    total = mem.get("total_tasks", 0)
+
+    table = Table(box=box.ROUNDED, border_style="dim", show_header=False, padding=(0, 1))
+    table.add_column(style="dim white", width=22)
+    table.add_column()
+
+    if profile:
+        table.add_row("Framework", profile.get("framework", "unknown"))
+        table.add_row("Language", profile.get("primary_language", "unknown"))
+        table.add_row("Files", str(profile.get("total_files", 0)))
+
+    table.add_row("Total logged", str(total))
+    table.add_row("Risk flags", ", ".join(risk_flags) if risk_flags else "none")
+
+    console.print()
+    console.print(Panel(table, title="[bold white]Project Memory[/bold white]", border_style="cyan", padding=(0, 1)))
+
+    if recent:
+        rt = Table(box=box.SIMPLE, show_header=True, header_style="bold white", border_style="dim")
+        rt.add_column("Date", style="dim", no_wrap=True)
+        rt.add_column("Source", no_wrap=True)
+        rt.add_column("Activity")
+        for t in recent:
+            ts = (t.get("timestamp") or "")[:10]
+            src = "relay" if t.get("source") == "relay-task" else "manual"
+            msg = t.get("original_task") or t.get("commit_message", "")
+            src_style = "bold cyan" if src == "relay" else "dim"
+            rt.add_row(ts, Text(src, style=src_style), msg[:70])
+        console.print(Panel(rt, title="[bold white]Recent Activity[/bold white]", border_style="dim", padding=(0, 1)))
+
+    if hot_files:
+        ht = Table(box=box.SIMPLE, show_header=True, header_style="bold white", border_style="dim")
+        ht.add_column("File")
+        ht.add_column("Touches", justify="right", style="dim")
+        ht.add_column("Risk", justify="center")
+        for f, n in hot_files:
+            risk = classify_file_risk(f)
+            color = RISK_COLORS.get(risk, "white")
+            ht.add_row(f"[dim]{f}[/dim]", str(n), Text(risk, style=color))
+        console.print(Panel(ht, title="[bold white]Hot Files[/bold white]", border_style="dim", padding=(0, 1)))
+
+
+def show_digest(tasks: list[dict], mem: dict, profile: dict | None) -> None:
+    """Full project health report."""
+    from datetime import datetime, timezone, timedelta
+    from relay_core.diff import classify_file_risk
+
+    now = datetime.now(timezone.utc)
+    week_ago = (now - timedelta(days=7)).isoformat()
+    this_week = [t for t in tasks if (t.get("timestamp") or "") >= week_ago]
+    total = len(tasks)
+    week_count = len(this_week)
+    hot_files = list(mem.get("hot_files", {}).items())[:5]
+    risk_flags = mem.get("last_risk_flags", [])
+
+    # Suggestions
+    suggestions: list[str] = []
+    if risk_flags:
+        suggestions.append(f"Review risk files: {', '.join(risk_flags[:3])}")
+    untested = [f for f, _ in hot_files if not any(x in f.lower() for x in ("test", "spec"))]
+    if len(untested) >= 3:
+        suggestions.append(f"Hot files with no test coverage: {', '.join(f.split('/')[-1] for f in untested[:3])}")
+    if week_count > 15:
+        suggestions.append("High commit velocity this week — consider a dedicated review session")
+    if not suggestions:
+        suggestions.append("Project looks healthy — no urgent flags")
+
+    table = Table(box=box.ROUNDED, border_style="dim", show_header=False, padding=(0, 1))
+    table.add_column(style="dim white", width=24)
+    table.add_column()
+    table.add_row("Total commits logged", str(total))
+    table.add_row("This week", str(week_count))
+    if profile:
+        table.add_row("Framework", profile.get("framework", "unknown"))
+        fr = profile.get("frontend_ratio", 0)
+        br = profile.get("backend_ratio", 0)
+        table.add_row("Split", f"Frontend {fr:.0%}  ·  Backend {br:.0%}")
+    table.add_row("Risk flags", ", ".join(risk_flags) if risk_flags else "none")
+
+    console.print()
+    console.print(Panel(table, title="[bold white]📊 Project Digest[/bold white]", border_style="cyan", padding=(0, 1)))
+
+    if hot_files:
+        lines = Text()
+        for f, n in hot_files:
+            risk = classify_file_risk(f)
+            color = RISK_COLORS.get(risk, "white")
+            lines.append(f"  {f}", style="dim")
+            lines.append(f"  {n}x  ", style="dim white")
+            lines.append(f"[{risk}]\n", style=color)
+        console.print(Panel(lines, title="[bold white]Hot Files[/bold white]", border_style="dim", padding=(0, 1)))
+
+    sug_text = "\n".join(f"→  {s}" for s in suggestions)
+    border = "yellow" if len(suggestions) > 1 else "green"
+    console.print(Panel(f"[yellow]{sug_text}[/yellow]" if border == "yellow" else f"[green]{sug_text}[/green]",
+                        title="[bold white]Suggestions[/bold white]", border_style=border, padding=(0, 1)))
 
 
 def show_install_hints(missing: list[str]) -> None:

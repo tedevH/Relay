@@ -94,5 +94,5 @@ FRAMEWORK_MARKERS: dict[str, str] = {
 ALL_COMMANDS = [
     "review", "ai-review", "summary", "commit", "push", "doctor", "status",
     "history", "why", "continue", "chain", "dashboard", "audit",
-    "config", "scan", "interactive",
+    "config", "scan", "interactive", "init", "context", "digest",
 ]
