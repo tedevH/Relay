@@ -98,6 +98,14 @@
   .search-input::placeholder { color: var(--muted); }
   .search-input:focus { border-color: var(--accent); }
 
+  /* Commit message */
+  .commit-msg-bar { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+  .commit-msg-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; flex-shrink: 0; }
+  .commit-msg-text { font-size: 12px; color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .copy-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: inherit; flex-shrink: 0; transition: all 0.15s; }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { border-color: var(--success); color: var(--success); }
+
   /* Diff viewer */
   .diff-layout { display: grid; grid-template-columns: 220px 1fr; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .diff-files { border-right: 1px solid var(--border); padding: 12px 0; overflow-y: auto; max-height: 600px; }
@@ -128,6 +136,43 @@
   .page-btn:hover { border-color: var(--accent); color: var(--accent); }
   .page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
+  [data-theme="light"] {
+    --bg: #f4f4f4;
+    --surface: #ffffff;
+    --surface2: #ebebeb;
+    --border: #d8d8d8;
+    --text: #1a1a1a;
+    --muted: #888;
+  }
+
+  .theme-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    margin-top: 10px;
+    width: 100%;
+    transition: all 0.15s;
+    text-align: left;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Terminal */
+  .term-btn {
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 12px; border-radius: 4px;
+    font-size: 11px; cursor: pointer; font-family: inherit;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  .term-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .term-btn.accent { border-color: var(--accent); color: var(--accent); }
+  .term-btn.accent:hover { background: var(--accent); color: #000; }
+  .term-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
   @media (max-width: 900px) {
     .grid-2, .grid-3 { grid-template-columns: 1fr; }
     .diff-layout { grid-template-columns: 1fr; }
@@ -147,10 +192,12 @@
     <span class="nav-item" onclick="showPage('history', this)">History</span>
     <span class="nav-item" onclick="showPage('diff', this)">Diff Viewer</span>
     <span class="nav-item" onclick="showPage('memory', this)">Memory</span>
+    <span class="nav-item" onclick="showPage('terminal', this)">Terminal</span>
     <div class="nav-section">Config</div>
     <span class="nav-item" onclick="showPage('settings', this)">Settings</span>
     <div class="sidebar-footer">
       <div><span class="status-dot"></span>Live · auto-refresh 30s</div>
+      <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">&#9788; Light mode</button>
     </div>
   </nav>
 
@@ -212,6 +259,11 @@
         <div class="page-title">Diff Viewer</div>
         <div class="page-sub">Last saved diff from your most recent task</div>
       </div>
+      <div class="commit-msg-bar" id="commit-msg-bar" style="display:none">
+        <span class="commit-msg-label">Suggested commit</span>
+        <span class="commit-msg-text" id="commit-msg-text"></span>
+        <button class="copy-btn" id="copy-btn" onclick="copyCommitMsg()">Copy</button>
+      </div>
       <div class="diff-layout" id="diff-layout">
         <div class="diff-files" id="diff-file-list"><div class="empty">Loading...</div></div>
         <div class="diff-content"><pre id="diff-pre"><code id="diff-code"></code></pre></div>
@@ -255,6 +307,72 @@
           <thead><tr><th>Key</th><th>Value</th></tr></thead>
           <tbody id="config-table"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div id="page-terminal" class="page">
+      <div class="page-header">
+        <div class="page-title">Terminal</div>
+        <div class="page-sub">Run relay commands directly from the dashboard — output streams live</div>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-title">Quick Actions</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button class="term-btn" onclick="runCmd('review')">⚡ review</button>
+          <button class="term-btn" onclick="runCmd('summary')">📋 summary</button>
+          <button class="term-btn" onclick="runCmd('status')">📡 status</button>
+          <button class="term-btn" onclick="runCmd('doctor')">⚕ doctor</button>
+          <button class="term-btn" onclick="runCmd('scan')">🔍 scan</button>
+          <button class="term-btn" onclick="runCmd('history')">📜 history</button>
+          <button class="term-btn" onclick="runCmd('config')">⚙ config</button>
+          <button class="term-btn" onclick="runCmd('audit')">🛡 audit</button>
+          <button class="term-btn accent" onclick="runCmd('ai-review')">🤖 ai-review</button>
+        </div>
+      </div>
+
+      <!-- Command input -->
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-title">Command</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="color:var(--accent);font-size:13px;flex-shrink:0">relay</span>
+          <input
+            id="term-input"
+            class="search-input"
+            style="flex:1"
+            placeholder="review  /  summary  /  why &quot;your task&quot;  /  scan  ..."
+            onkeydown="if(event.key==='Enter') runFromInput()"
+          />
+          <button class="term-btn accent" onclick="runFromInput()" style="flex-shrink:0">Run ↵</button>
+          <button class="term-btn" onclick="clearTerm()" style="flex-shrink:0">Clear</button>
+        </div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted)">
+          Allowed: review · ai-review · summary · doctor · status · history · scan · config · audit · why "task" · chain "task"
+        </div>
+      </div>
+
+      <!-- Output -->
+      <div class="panel">
+        <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Output</span>
+          <span id="term-status" style="font-size:10px;color:var(--muted)">idle</span>
+        </div>
+        <div id="term-output" style="
+          background:#050505;
+          border-radius:6px;
+          padding:16px;
+          min-height:320px;
+          max-height:560px;
+          overflow-y:auto;
+          font-size:12px;
+          line-height:1.7;
+          font-family:'SF Mono','Fira Code',monospace;
+          color:#c8c8c8;
+          white-space:pre-wrap;
+          word-break:break-word;
+        "><span style="color:var(--muted)">Ready. Run a command above or click a quick action.</span></div>
       </div>
     </div>
 
@@ -339,9 +457,14 @@ function renderOverview() {
   renderRecentTasks();
 }
 
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 function renderAgentChart(claude, codex) {
   const ctx = document.getElementById('chart-agent').getContext('2d');
   if (agentChart) agentChart.destroy();
+  const mutedColor = cssVar('--muted');
   agentChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -355,7 +478,7 @@ function renderAgentChart(claude, codex) {
     },
     options: {
       responsive: true, maintainAspectRatio: true,
-      plugins: { legend: { labels: { color: '#999', font: { family: 'monospace', size: 11 } } } },
+      plugins: { legend: { labels: { color: mutedColor, font: { family: 'monospace', size: 11 } } } },
     }
   });
 }
@@ -371,6 +494,8 @@ function renderActivityChart(tasks) {
     counts.push(tasks.filter(t => (t.timestamp||'').startsWith(key)).length);
   }
   if (activityChart) activityChart.destroy();
+  const mutedColor = cssVar('--muted');
+  const gridColor = cssVar('--border');
   activityChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -388,8 +513,8 @@ function renderActivityChart(tasks) {
       responsive: true, maintainAspectRatio: true,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: '#1a1a1a' } },
-        y: { ticks: { color: '#666', font: { size: 10 }, stepSize: 1 }, grid: { color: '#1a1a1a' }, min: 0 }
+        x: { ticks: { color: mutedColor, font: { size: 10 } }, grid: { color: gridColor } },
+        y: { ticks: { color: mutedColor, font: { size: 10 }, stepSize: 1 }, grid: { color: gridColor }, min: 0 }
       }
     }
   });
@@ -464,6 +589,16 @@ async function loadDiff() {
     const data = await r.json();
     const text = data.diff || '';
     const files = data.files || [];
+    const commitMsg = data.commit_message || '';
+
+    const bar = document.getElementById('commit-msg-bar');
+    const msgEl = document.getElementById('commit-msg-text');
+    if (commitMsg) {
+      msgEl.textContent = commitMsg;
+      bar.style.display = 'flex';
+    } else {
+      bar.style.display = 'none';
+    }
 
     const fileList = document.getElementById('diff-file-list');
     if (!files.length) {
@@ -482,6 +617,17 @@ async function loadDiff() {
   } catch(e) {
     document.getElementById('diff-code').textContent = 'Failed to load diff.';
   }
+}
+
+function copyCommitMsg() {
+  const msg = document.getElementById('commit-msg-text').textContent;
+  if (!msg) return;
+  navigator.clipboard.writeText(msg).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+  });
 }
 
 function selectDiffFile(el, file) {
@@ -565,7 +711,112 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Theme ──
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('theme-toggle');
+  if (theme === 'light') {
+    btn.textContent = '◑ Dark mode';
+  } else {
+    btn.textContent = '☀ Light mode';
+  }
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('relay-theme', next);
+  applyTheme(next);
+  renderOverview();
+}
+
+// ── Terminal ──
+let termRunning = false;
+let termES = null;
+
+function termOut(html) {
+  const el = document.getElementById('term-output');
+  el.innerHTML += html;
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearTerm() {
+  document.getElementById('term-output').innerHTML =
+    '<span style="color:var(--muted)">Cleared.</span>\n';
+}
+
+function setTermStatus(msg, color) {
+  const el = document.getElementById('term-status');
+  el.textContent = msg;
+  el.style.color = color || 'var(--muted)';
+}
+
+function setTermBtnsDisabled(disabled) {
+  document.querySelectorAll('.term-btn').forEach(b => b.disabled = disabled);
+}
+
+function runFromInput() {
+  const val = document.getElementById('term-input').value.trim();
+  if (!val) return;
+  runCmd(val);
+}
+
+function runCmd(cmdStr) {
+  if (termRunning) return;
+
+  // Close any previous stream
+  if (termES) { termES.close(); termES = null; }
+
+  termRunning = true;
+  setTermBtnsDisabled(true);
+  setTermStatus('running...', 'var(--accent)');
+
+  // Print prompt line
+  const el = document.getElementById('term-output');
+  if (el.innerHTML.includes('Ready') || el.innerHTML.includes('Cleared')) {
+    el.innerHTML = '';
+  }
+  termOut(`<span style="color:var(--accent);font-weight:700">relay ${esc(cmdStr)}</span>\n`);
+
+  const url = `/api/terminal/run?cmd=${encodeURIComponent(cmdStr)}`;
+  termES = new EventSource(url);
+
+  termES.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.done) {
+      termES.close();
+      termES = null;
+      termRunning = false;
+      setTermBtnsDisabled(false);
+      const ok = data.exit_code === 0;
+      setTermStatus(ok ? '✓ done' : `✗ exit ${data.exit_code}`, ok ? 'var(--success)' : 'var(--error)');
+      termOut(`\n<span style="color:var(--muted);font-size:10px">─────────────────────────────</span>\n`);
+      // Refresh dashboard data after command
+      setTimeout(loadTasks, 800);
+      return;
+    }
+    if (data.line !== undefined) {
+      termOut(esc(data.line) + '\n');
+    }
+  };
+
+  termES.onerror = () => {
+    termOut(`\n<span style="color:var(--error)">Connection error — is the dashboard still running?</span>\n`);
+    if (termES) { termES.close(); termES = null; }
+    termRunning = false;
+    setTermBtnsDisabled(false);
+    setTermStatus('error', 'var(--error)');
+  };
+}
+
+// Allow Enter key in input
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('term-input');
+  if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') runFromInput(); });
+});
+
 // ── Init & auto-refresh ──
+applyTheme(localStorage.getItem('relay-theme') || 'dark');
 loadTasks();
 setInterval(loadTasks, 30000);
 </script>
