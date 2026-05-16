@@ -1,0 +1,59 @@
+name: Relay Audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  relay-audit:
+    name: Relay Code Audit
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Relay dependencies
+        run: pip install rich flask
+
+      - name: Run Relay audit
+        id: relay-audit
+        run: |
+          python relay.py audit --ci > relay-audit-output.md 2>&1 || true
+          cat relay-audit-output.md
+        continue-on-error: true
+
+      - name: Post audit results as PR comment
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let body = '## ⚡ Relay Audit\n\n';
+            try {
+              body += fs.readFileSync('relay-audit-output.md', 'utf8');
+            } catch(e) {
+              body += 'Audit output not available.';
+            }
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body.slice(0, 65535),
+            });
+
+      - name: Fail if high-risk findings
+        run: python relay.py audit --ci
+        env:
+          RELAY_CI: "1"

@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Relay Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --surface2: #1a1a1a;
+    --border: #2a2a2a;
+    --accent: #00d4aa;
+    --accent2: #4f9ef8;
+    --claude: #00d4aa;
+    --codex: #4f9ef8;
+    --success: #22c55e;
+    --error: #ef4444;
+    --warn: #f59e0b;
+    --text: #e5e5e5;
+    --muted: #666;
+    --high: #ef4444;
+    --medium: #f59e0b;
+    --low: #22c55e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; }
+  a { color: var(--accent); text-decoration: none; }
+
+  /* Layout */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 200px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px 0; display: flex; flex-direction: column; flex-shrink: 0; }
+  .main { flex: 1; padding: 28px; overflow-x: hidden; }
+
+  /* Sidebar */
+  .logo { padding: 0 20px 24px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .logo-title { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 1px; }
+  .logo-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .nav-item { display: block; padding: 9px 20px; color: var(--muted); cursor: pointer; border-left: 2px solid transparent; transition: all 0.15s; font-size: 12px; }
+  .nav-item:hover { color: var(--text); background: var(--surface2); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(0,212,170,0.06); }
+  .nav-section { padding: 16px 20px 6px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .sidebar-footer { margin-top: auto; padding: 16px 20px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); }
+  .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--success); margin-right: 6px; }
+
+  /* Tabs/pages */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Page header */
+  .page-header { margin-bottom: 24px; }
+  .page-title { font-size: 18px; font-weight: 700; color: var(--text); }
+  .page-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* Cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
+  .card-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+  .card-value { font-size: 28px; font-weight: 700; color: var(--text); }
+  .card-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .card.accent .card-value { color: var(--accent); }
+  .card.blue .card-value { color: var(--accent2); }
+
+  /* Grids */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+
+  /* Chart panels */
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+  .panel-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 16px; }
+  .chart-wrap { position: relative; }
+  .chart-wrap canvas { max-height: 220px; }
+
+  /* Tables */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 24px; }
+  .table-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .table-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { padding: 10px 16px; text-align: left; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.5px; }
+  .badge-claude { background: rgba(0,212,170,0.15); color: var(--claude); }
+  .badge-codex { background: rgba(79,158,248,0.15); color: var(--codex); }
+  .badge-success { background: rgba(34,197,94,0.15); color: var(--success); }
+  .badge-error { background: rgba(239,68,68,0.15); color: var(--error); }
+  .badge-high { background: rgba(239,68,68,0.15); color: var(--high); }
+  .badge-medium { background: rgba(245,158,11,0.15); color: var(--medium); }
+  .badge-low { background: rgba(34,197,94,0.15); color: var(--low); }
+
+  /* Search */
+  .search-bar { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .search-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 12px; color: var(--text); font-family: inherit; font-size: 12px; width: 100%; outline: none; }
+  .search-input::placeholder { color: var(--muted); }
+  .search-input:focus { border-color: var(--accent); }
+
+  /* Diff viewer */
+  .diff-layout { display: grid; grid-template-columns: 220px 1fr; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .diff-files { border-right: 1px solid var(--border); padding: 12px 0; overflow-y: auto; max-height: 600px; }
+  .diff-file-item { padding: 7px 14px; font-size: 11px; color: var(--muted); cursor: pointer; border-left: 2px solid transparent; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .diff-file-item:hover { background: var(--surface2); color: var(--text); }
+  .diff-file-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(0,212,170,0.06); }
+  .diff-content { overflow: auto; max-height: 600px; }
+  pre { padding: 16px; font-size: 11px; line-height: 1.6; white-space: pre; overflow-x: auto; }
+  .diff-add { background: rgba(34,197,94,0.08); color: #86efac; }
+  .diff-remove { background: rgba(239,68,68,0.08); color: #fca5a5; }
+  .diff-meta { color: var(--muted); }
+
+  /* Memory bars */
+  .bar-wrap { margin-bottom: 12px; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 5px; }
+  .bar-label span:first-child { color: var(--text); }
+  .bar-label span:last-child { color: var(--muted); }
+  .bar-track { background: var(--surface2); border-radius: 99px; height: 6px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 99px; transition: width 0.5s; }
+  .bar-claude { background: var(--claude); }
+  .bar-codex { background: var(--accent2); }
+
+  /* Misc */
+  .empty { padding: 40px; text-align: center; color: var(--muted); font-size: 12px; }
+  .refresh-note { font-size: 10px; color: var(--muted); margin-left: 8px; }
+  .pagination { padding: 12px 16px; display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border); }
+  .page-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: inherit; }
+  .page-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  @media (max-width: 900px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .diff-layout { grid-template-columns: 1fr; }
+    .diff-files { max-height: 160px; border-right: none; border-bottom: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="logo">
+      <div class="logo-title">⚡ RELAY</div>
+      <div class="logo-sub">Developer Dashboard</div>
+    </div>
+    <span class="nav-item active" onclick="showPage('overview', this)">Overview</span>
+    <span class="nav-item" onclick="showPage('history', this)">History</span>
+    <span class="nav-item" onclick="showPage('diff', this)">Diff Viewer</span>
+    <span class="nav-item" onclick="showPage('memory', this)">Memory</span>
+    <div class="nav-section">Config</div>
+    <span class="nav-item" onclick="showPage('settings', this)">Settings</span>
+    <div class="sidebar-footer">
+      <div><span class="status-dot"></span>Live · auto-refresh 30s</div>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Overview -->
+    <div id="page-overview" class="page active">
+      <div class="page-header">
+        <div class="page-title">Overview</div>
+        <div class="page-sub">Your Relay activity at a glance</div>
+      </div>
+      <div class="cards" id="stat-cards">
+        <div class="card"><div class="card-label">Total Tasks</div><div class="card-value" id="stat-total">—</div></div>
+        <div class="card accent"><div class="card-label">Claude Tasks</div><div class="card-value" id="stat-claude">—</div><div class="card-sub" id="stat-claude-pct"></div></div>
+        <div class="card blue"><div class="card-label">Codex Tasks</div><div class="card-value" id="stat-codex">—</div><div class="card-sub" id="stat-codex-pct"></div></div>
+        <div class="card"><div class="card-label">Success Rate</div><div class="card-value" id="stat-success">—</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-title">Agent Distribution</div>
+          <div class="chart-wrap"><canvas id="chart-agent"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Task Activity (last 14 days)</div>
+          <div class="chart-wrap"><canvas id="chart-activity"></canvas></div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><span class="table-title">Recent Tasks</span></div>
+        <table>
+          <thead><tr><th>Time</th><th>Agent</th><th>Status</th><th>Files</th><th>Task</th></tr></thead>
+          <tbody id="recent-tasks"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div id="page-history" class="page">
+      <div class="page-header">
+        <div class="page-title">Task History</div>
+        <div class="page-sub">All Relay tasks for this repository</div>
+      </div>
+      <div class="table-wrap">
+        <div class="search-bar">
+          <input class="search-input" id="history-search" placeholder="Search tasks..." oninput="filterHistory()"/>
+        </div>
+        <table>
+          <thead><tr><th>Time</th><th>Agent</th><th>Status</th><th>Rate limit</th><th>Files</th><th>Task / Info</th></tr></thead>
+          <tbody id="history-table"></tbody>
+        </table>
+        <div class="pagination" id="history-pagination"></div>
+      </div>
+    </div>
+
+    <!-- Diff -->
+    <div id="page-diff" class="page">
+      <div class="page-header">
+        <div class="page-title">Diff Viewer</div>
+        <div class="page-sub">Last saved diff from your most recent task</div>
+      </div>
+      <div class="diff-layout" id="diff-layout">
+        <div class="diff-files" id="diff-file-list"><div class="empty">Loading...</div></div>
+        <div class="diff-content"><pre id="diff-pre"><code id="diff-code"></code></pre></div>
+      </div>
+    </div>
+
+    <!-- Memory -->
+    <div id="page-memory" class="page">
+      <div class="page-header">
+        <div class="page-title">Memory</div>
+        <div class="page-sub">Relay's accumulated knowledge about this project</div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-title">Agent Usage</div>
+          <div id="agent-bars"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Session Stats</div>
+          <div id="memory-stats"></div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><span class="table-title">Hot Files <span class="refresh-note">— most frequently touched</span></span></div>
+        <table>
+          <thead><tr><th>File</th><th>Touch Count</th><th>Risk</th></tr></thead>
+          <tbody id="hot-files-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="page-settings" class="page">
+      <div class="page-header">
+        <div class="page-title">Settings</div>
+        <div class="page-sub">Current .relay/config.json for this project</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Config</div>
+        <table>
+          <thead><tr><th>Key</th><th>Value</th></tr></thead>
+          <tbody id="config-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /shell -->
+
+<script>
+// ── Navigation ──
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  if (el) el.classList.add('active');
+  if (id === 'diff') loadDiff();
+  if (id === 'memory') loadMemory();
+  if (id === 'settings') loadSettings();
+  if (id === 'history') renderHistory();
+}
+
+// ── State ──
+let allTasks = [];
+let historyPage = 0;
+const PAGE_SIZE = 20;
+let agentChart = null, activityChart = null;
+let diffLines = [];
+let currentDiffFile = null;
+
+// ── Helpers ──
+function fmt(ts) {
+  if (!ts) return '—';
+  return ts.slice(0,16).replace('T',' ');
+}
+function agentBadge(a) {
+  if (!a) return '<span class="badge badge-codex">codex</span>';
+  const l = a.toLowerCase();
+  const cls = l === 'claude' ? 'badge-claude' : 'badge-codex';
+  return `<span class="badge ${cls}">${l}</span>`;
+}
+function statusBadge(ok) {
+  return ok ? '<span class="badge badge-success">ok</span>' : '<span class="badge badge-error">fail</span>';
+}
+function riskBadge(risk) {
+  const r = (risk||'LOW').toUpperCase();
+  const cls = r === 'HIGH' ? 'badge-high' : r === 'MEDIUM' ? 'badge-medium' : 'badge-low';
+  return `<span class="badge ${cls}">${r}</span>`;
+}
+function classifyRisk(path) {
+  const p = path.toLowerCase();
+  if (['.env','.pem','.key','secrets','credentials','migrations','auth','stripe','payment']
+    .some(x => p.includes(x))) return 'HIGH';
+  if (['test','spec','readme','.md'].some(x => p.includes(x))) return 'LOW';
+  return 'MEDIUM';
+}
+
+// ── Load all tasks ──
+async function loadTasks() {
+  try {
+    const r = await fetch('/api/tasks');
+    allTasks = await r.json();
+  } catch(e) { allTasks = []; }
+  renderOverview();
+}
+
+// ── Overview ──
+function renderOverview() {
+  const tasks = allTasks.filter(t => t.command_type === 'task' || !t.command_type);
+  const total = tasks.length;
+  const claude = tasks.filter(t => t.selected_agent === 'claude').length;
+  const codex = tasks.filter(t => t.selected_agent === 'codex').length;
+  const success = tasks.filter(t => t.success).length;
+  const successPct = total ? Math.round(success / total * 100) : 0;
+
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-claude').textContent = claude;
+  document.getElementById('stat-claude-pct').textContent = total ? Math.round(claude/total*100) + '%' : '';
+  document.getElementById('stat-codex').textContent = codex;
+  document.getElementById('stat-codex-pct').textContent = total ? Math.round(codex/total*100) + '%' : '';
+  document.getElementById('stat-success').textContent = successPct + '%';
+
+  renderAgentChart(claude, codex);
+  renderActivityChart(tasks);
+  renderRecentTasks();
+}
+
+function renderAgentChart(claude, codex) {
+  const ctx = document.getElementById('chart-agent').getContext('2d');
+  if (agentChart) agentChart.destroy();
+  agentChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Claude', 'Codex'],
+      datasets: [{
+        data: [claude, codex],
+        backgroundColor: ['rgba(0,212,170,0.8)', 'rgba(79,158,248,0.8)'],
+        borderColor: ['#00d4aa', '#4f9ef8'],
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { labels: { color: '#999', font: { family: 'monospace', size: 11 } } } },
+    }
+  });
+}
+
+function renderActivityChart(tasks) {
+  const ctx = document.getElementById('chart-activity').getContext('2d');
+  const days = [];
+  const counts = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0,10);
+    days.push(key.slice(5));
+    counts.push(tasks.filter(t => (t.timestamp||'').startsWith(key)).length);
+  }
+  if (activityChart) activityChart.destroy();
+  activityChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: days,
+      datasets: [{
+        label: 'Tasks',
+        data: counts,
+        borderColor: '#00d4aa',
+        backgroundColor: 'rgba(0,212,170,0.08)',
+        fill: true, tension: 0.3, pointRadius: 3,
+        pointBackgroundColor: '#00d4aa',
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: '#1a1a1a' } },
+        y: { ticks: { color: '#666', font: { size: 10 }, stepSize: 1 }, grid: { color: '#1a1a1a' }, min: 0 }
+      }
+    }
+  });
+}
+
+function renderRecentTasks() {
+  const tasks = [...allTasks].reverse().slice(0, 8);
+  const tbody = document.getElementById('recent-tasks');
+  if (!tasks.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">No tasks yet.</td></tr>'; return; }
+  tbody.innerHTML = tasks.map(t => {
+    const ct = t.command_type || 'task';
+    let agentCell = ct === 'commit' ? '<span class="badge">commit</span>' : ct === 'push' ? '<span class="badge">push</span>' : agentBadge(t.selected_agent);
+    const info = t.original_task || t.commit_message || '';
+    const files = (t.changed_files || []).length;
+    return `<tr>
+      <td>${fmt(t.timestamp)}</td>
+      <td>${agentCell}</td>
+      <td>${statusBadge(t.success)}</td>
+      <td>${files}</td>
+      <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(info.slice(0,80))}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── History ──
+let filteredTasks = [];
+function filterHistory() {
+  const q = document.getElementById('history-search').value.toLowerCase();
+  filteredTasks = allTasks.filter(t =>
+    (t.original_task||'').toLowerCase().includes(q) ||
+    (t.commit_message||'').toLowerCase().includes(q) ||
+    (t.selected_agent||'').toLowerCase().includes(q)
+  );
+  historyPage = 0;
+  renderHistory();
+}
+
+function renderHistory() {
+  if (!filteredTasks.length) filteredTasks = [...allTasks];
+  const reversed = [...filteredTasks].reverse();
+  const slice = reversed.slice(historyPage * PAGE_SIZE, (historyPage + 1) * PAGE_SIZE);
+  const tbody = document.getElementById('history-table');
+  if (!slice.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">No tasks found.</td></tr>'; return; }
+  tbody.innerHTML = slice.map(t => {
+    const ct = t.command_type || 'task';
+    const agent = ct === 'commit' ? 'commit' : ct === 'push' ? 'push' : (t.selected_agent || 'codex');
+    const info = t.original_task || t.commit_message || `${t.branch || ''} → ${t.remote || ''}`;
+    const rl = t.rate_limit_detected ? '<span style="color:var(--warn)">yes</span>' : '<span style="color:var(--muted)">no</span>';
+    return `<tr>
+      <td>${fmt(t.timestamp)}</td>
+      <td>${agentBadge(agent)}</td>
+      <td>${statusBadge(t.success)}</td>
+      <td>${rl}</td>
+      <td>${(t.changed_files||[]).length}</td>
+      <td style="max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(info.slice(0,100))}</td>
+    </tr>`;
+  }).join('');
+
+  const pages = Math.ceil(filteredTasks.length / PAGE_SIZE);
+  const pag = document.getElementById('history-pagination');
+  if (pages <= 1) { pag.innerHTML = ''; return; }
+  pag.innerHTML = Array.from({length: pages}, (_, i) =>
+    `<button class="page-btn ${i===historyPage?'active':''}" onclick="goPage(${i})">${i+1}</button>`
+  ).join('');
+}
+function goPage(n) { historyPage = n; renderHistory(); }
+
+// ── Diff ──
+async function loadDiff() {
+  try {
+    const r = await fetch('/api/diff');
+    const data = await r.json();
+    const text = data.diff || '';
+    const files = data.files || [];
+
+    const fileList = document.getElementById('diff-file-list');
+    if (!files.length) {
+      fileList.innerHTML = '<div class="empty">No diff</div>';
+      document.getElementById('diff-code').textContent = text || 'No diff available.';
+      return;
+    }
+
+    fileList.innerHTML = files.map((f,i) =>
+      `<div class="diff-file-item ${i===0?'active':''}" onclick="selectDiffFile(this,'${esc(f)}')" data-file="${esc(f)}">${esc(f)}</div>`
+    ).join('');
+
+    diffLines = text.split('\n');
+    currentDiffFile = files[0];
+    renderDiffForFile(files[0]);
+  } catch(e) {
+    document.getElementById('diff-code').textContent = 'Failed to load diff.';
+  }
+}
+
+function selectDiffFile(el, file) {
+  document.querySelectorAll('.diff-file-item').forEach(x => x.classList.remove('active'));
+  el.classList.add('active');
+  currentDiffFile = file;
+  renderDiffForFile(file);
+}
+
+function renderDiffForFile(file) {
+  let inFile = false, collecting = false;
+  const output = [];
+  for (const line of diffLines) {
+    if (line.startsWith('diff --git') && line.includes(file)) { inFile = true; continue; }
+    if (line.startsWith('diff --git') && inFile) break;
+    if (!inFile) continue;
+    output.push(line);
+  }
+  const pre = document.getElementById('diff-code');
+  pre.innerHTML = output.map(line => {
+    if (line.startsWith('+') && !line.startsWith('+++')) return `<span class="diff-add">${esc(line)}</span>`;
+    if (line.startsWith('-') && !line.startsWith('---')) return `<span class="diff-remove">${esc(line)}</span>`;
+    if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) return `<span class="diff-meta">${esc(line)}</span>`;
+    return esc(line);
+  }).join('\n');
+}
+
+// ── Memory ──
+async function loadMemory() {
+  try {
+    const r = await fetch('/api/memory');
+    const mem = await r.json();
+    const total = mem.total_tasks || 0;
+    const claude = (mem.agent_stats || {}).claude || 0;
+    const codex = (mem.agent_stats || {}).codex || 0;
+
+    const bars = document.getElementById('agent-bars');
+    bars.innerHTML = `
+      <div class="bar-wrap">
+        <div class="bar-label"><span>Claude</span><span>${claude} tasks</span></div>
+        <div class="bar-track"><div class="bar-fill bar-claude" style="width:${total?Math.round(claude/total*100):0}%"></div></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-label"><span>Codex</span><span>${codex} tasks</span></div>
+        <div class="bar-track"><div class="bar-fill bar-codex" style="width:${total?Math.round(codex/total*100):0}%"></div></div>
+      </div>`;
+
+    const stats = document.getElementById('memory-stats');
+    stats.innerHTML = `
+      <table><tbody>
+        <tr><td style="color:var(--muted);padding:6px 0 6px 0;width:120px">Total tasks</td><td>${total}</td></tr>
+        <tr><td style="color:var(--muted);padding:6px 0">Reviews run</td><td>${mem.review_count||0}</td></tr>
+        <tr><td style="color:var(--muted);padding:6px 0">Risk flags</td><td>${(mem.last_risk_flags||[]).join(', ')||'none'}</td></tr>
+      </tbody></table>`;
+
+    const hot = mem.hot_files || {};
+    const hotSorted = Object.entries(hot).sort((a,b)=>b[1]-a[1]).slice(0,20);
+    const tbody = document.getElementById('hot-files-table');
+    tbody.innerHTML = hotSorted.length ? hotSorted.map(([f,n]) =>
+      `<tr><td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f)}</td><td>${n}</td><td>${riskBadge(classifyRisk(f))}</td></tr>`
+    ).join('') : '<tr><td colspan="3" class="empty">No file data yet.</td></tr>';
+  } catch(e) {}
+}
+
+// ── Settings ──
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/config');
+    const cfg = await r.json();
+    const skip = new Set(['frontend_paths','backend_paths','frontend_keywords','backend_keywords']);
+    const tbody = document.getElementById('config-table');
+    tbody.innerHTML = Object.entries(cfg).filter(([k])=>!skip.has(k)).map(([k,v]) => {
+      const display = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      return `<tr><td style="color:var(--muted)">${k}</td><td>${esc(display)}</td></tr>`;
+    }).join('');
+  } catch(e) {}
+}
+
+// ── Escape HTML ──
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init & auto-refresh ──
+loadTasks();
+setInterval(loadTasks, 30000);
+</script>
+</body>
+</html>
