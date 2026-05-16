@@ -132,6 +132,18 @@ def _inject_context(repo: RepoState, task: str) -> None:
             lines.append(f"- {f}")
         lines.append("")
 
+    # Include key file contents so Claude doesn't need to read them first
+    if repo.repo_root:
+        key_files = ["relay_dashboard/templates/index.html",
+                     "relay_dashboard/server.py", "relay_core/main.py"]
+        for rel_path in key_files:
+            full = repo.repo_root / rel_path
+            if full.exists():
+                size = full.stat().st_size
+                if size < 80_000:  # skip very large files
+                    content = full.read_text(encoding="utf-8", errors="replace")
+                    lines += [f"## File: {rel_path}", "```", content[:6000], "```", ""]
+
     context_path = repo.relay_dir / "context.md"
     context_path.write_text("\n".join(lines), encoding="utf-8")
 
