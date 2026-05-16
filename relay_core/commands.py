@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -74,7 +75,7 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     # Update CLAUDE.md and context.md before handing off so Claude reads
     # project memory immediately without exploring the codebase first
     _inject_context(repo, task)
-    _update_claude_md(repo)
+    _update_claude_md(repo, task)
 
     cwd = repo.repo_root or repo.cwd
     tui.show_handoff_note(agent, task)
@@ -148,49 +149,79 @@ def _inject_context(repo: RepoState, task: str) -> None:
     context_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _update_claude_md(repo: RepoState) -> None:
-    """Write or update CLAUDE.md at the repo root so Claude reads project
-    memory automatically on every session — no codebase exploration needed.
+def _relevant_files_for_task(task: str, repo: RepoState) -> list[str]:
+    """Return the specific files most relevant to this task so Claude
+    can go straight to them without exploring the codebase."""
+    task_lower = task.lower()
+    candidates: list[tuple[int, str]] = []
 
-    Only writes the Relay section. If CLAUDE.md already exists with other
-    content, the Relay section is appended or updated in-place.
+    if not repo.repo_root:
+        return []
+
+    # Score every tracked file against task keywords
+    for root, dirs, files in os.walk(repo.repo_root):
+        # Skip hidden and irrelevant dirs
+        dirs[:] = [d for d in dirs if d not in
+                   {".git", "node_modules", "__pycache__", ".relay", ".next",
+                    "dist", "build", ".venv", "venv"}]
+        for fname in files:
+            full = Path(root) / fname
+            rel = str(full.relative_to(repo.repo_root))
+            rel_lower = rel.lower()
+            score = 0
+            # Score by path match against task words
+            for word in task_lower.split():
+                if len(word) > 3 and word in rel_lower:
+                    score += 3
+            # Boost recently hot files
+            if score > 0:
+                candidates.append((score, rel))
+
+    # Sort by score, return top 3
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [rel for _, rel in candidates[:3]]
+
+
+def _update_claude_md(repo: RepoState, task: str = "") -> None:
+    """Write/update CLAUDE.md so Claude knows exactly which files to edit.
+
+    Instead of exploring the codebase, Claude reads this and goes straight
+    to the relevant files. Updated before every relay task handoff.
     """
     if not repo.repo_root or not repo.relay_dir:
         return
 
+    relevant = _relevant_files_for_task(task, repo) if task else []
+
+    relay_section = "## Relay — Project Context\n\n"
+    relay_section += "**Read `.relay/context.md` first** — it has the current task, recent activity, and hot files.\n\n"
+
+    relay_section += "### Project structure\n"
+    relay_section += "- `relay_core/` — CLI engine (routing, commands, git ops, memory, TUI)\n"
+    relay_section += "- `relay_dashboard/templates/index.html` — the entire web dashboard UI\n"
+    relay_section += "- `relay_dashboard/server.py` — Flask server + API endpoints\n"
+    relay_section += "- `relay_ci/` — CI audit tooling\n"
+    relay_section += "- `.relay/` — local memory (tasks.json, context.md, config.json)\n\n"
+
+    if relevant:
+        relay_section += "### Files to focus on for this task\n"
+        for f in relevant:
+            relay_section += f"- `{f}`\n"
+        relay_section += "\nGo directly to these files. Skip broad codebase exploration.\n"
+
+    import re
     claude_md = repo.repo_root / "CLAUDE.md"
-    relay_section = f"""## Relay Memory
-
-This project uses Relay for AI-assisted development tracking.
-Read `.relay/context.md` before starting any task — it contains:
-- The current task description
-- Recent activity on this repo
-- Most frequently modified files and their risk levels
-- Known risk flags from previous sessions
-
-File structure:
-- `relay_core/` — CLI engine (routing, commands, git, memory, TUI)
-- `relay_dashboard/` — local web dashboard (Flask + HTML/CSS/JS)
-- `relay_ci/` — CI audit tooling
-- `.relay/` — local memory (tasks, diffs, context, config)
-
-Always check `.relay/context.md` first. It saves you from exploring files you already know about.
-"""
-
     if claude_md.exists():
         existing = claude_md.read_text(encoding="utf-8")
-        if "## Relay Memory" in existing:
-            # Update existing Relay section
-            import re
+        if "## Relay" in existing:
             updated = re.sub(
-                r"## Relay Memory.*?(?=\n## |\Z)",
-                relay_section.strip(),
+                r"## Relay.*?(?=\n## |\Z)",
+                relay_section.rstrip(),
                 existing,
                 flags=re.DOTALL,
             )
             claude_md.write_text(updated, encoding="utf-8")
         else:
-            # Append Relay section
             claude_md.write_text(existing.rstrip() + "\n\n" + relay_section, encoding="utf-8")
     else:
         claude_md.write_text(relay_section, encoding="utf-8")

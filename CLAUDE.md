@@ -1,16 +1,17 @@
-## Relay Memory
+## Relay — Project Context
 
-This project uses Relay for AI-assisted development tracking.
-Read `.relay/context.md` before starting any task — it contains:
-- The current task description
-- Recent activity on this repo
-- Most frequently modified files and their risk levels
-- Known risk flags from previous sessions
+**Read `.relay/context.md` first** — it has the current task, recent activity, and hot files.
 
-File structure:
-- `relay_core/` — CLI engine (routing, commands, git, memory, TUI)
-- `relay_dashboard/` — local web dashboard (Flask + HTML/CSS/JS)
+### Project structure
+- `relay_core/` — CLI engine (routing, commands, git ops, memory, TUI)
+- `relay_dashboard/templates/index.html` — the entire web dashboard UI
+- `relay_dashboard/server.py` — Flask server + API endpoints
 - `relay_ci/` — CI audit tooling
-- `.relay/` — local memory (tasks, diffs, context, config)
+- `.relay/` — local memory (tasks.json, context.md, config.json)
 
-Always check `.relay/context.md` first. It saves you from exploring files you already know about.
+### Files to focus on for this task
+- `relay_dashboard/server.py`
+- `relay_dashboard/__init__.py`
+- `relay_dashboard/templates/index.html`
+
+Go directly to these files. Skip broad codebase exploration.
