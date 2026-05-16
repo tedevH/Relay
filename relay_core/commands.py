@@ -78,8 +78,10 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     cwd = repo.repo_root or repo.cwd
     tui.show_handoff_note(agent, task)
 
-    # Hand off completely — Relay process is replaced by Claude/Codex
-    exec_agent(agent, task, cwd)
+    # Run agent with session continuity — Claude uses --continue,
+    # Codex uses saved session ID via 'codex resume'
+    from relay_core.git import run_agent
+    run_agent(agent, task, cwd, relay_dir=repo.relay_dir)
 
     # Never reached — exec_agent replaces this process
     return 0

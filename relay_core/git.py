@@ -88,33 +88,107 @@ def has_uncommitted_changes(repo: RepoState) -> bool:
     return bool(git_status_lines(repo))
 
 
-def exec_agent(agent: str, prompt: str, cwd: Path) -> None:
-    """Replace the current Relay process with Claude or Codex natively.
+def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None) -> int:
+    """Run Claude or Codex with full native terminal, then return to Relay.
 
-    Uses os.execvp — Relay is completely replaced by the agent process.
-    The agent runs exactly as if the user typed 'claude' or 'codex' themselves:
-    full streaming UI, full terminal control, nothing intercepted.
+    Uses subprocess.run (not execvp) so Relay gets control back after the
+    agent exits — allowing session ID capture and post-run bookkeeping.
 
-    The task is copied to the clipboard. User presses Cmd+V (Mac) or Ctrl+Shift+V
-    (Linux) to paste it into the agent's input prompt.
+    Claude: uses --continue to automatically resume the last session in this
+            directory. No session ID tracking needed.
+    Codex:  saves the session ID printed on exit and uses 'codex resume <id>'
+            on the next run for full context continuity.
+
+    Task is copied to clipboard — user presses Cmd+V to paste.
     """
-    import subprocess as _sp
+    import re as _re
 
     # Copy task to clipboard
     try:
-        _sp.run(["pbcopy"], input=prompt.encode(), check=False)
+        subprocess.run(["pbcopy"], input=prompt.encode(), check=False)
     except FileNotFoundError:
         try:
-            _sp.run(["xclip", "-selection", "clipboard"],
-                    input=prompt.encode(), check=False)
+            subprocess.run(["xclip", "-selection", "clipboard"],
+                           input=prompt.encode(), check=False)
         except FileNotFoundError:
             pass
 
     os.chdir(str(cwd))
+
     if agent == "claude":
-        os.execvp("claude", ["claude", "--permission-mode", "acceptEdits"])
+        # --continue resumes the most recent Claude session in this directory
+        # automatically — no session ID needed, full context preserved
+        result = subprocess.run(
+            ["claude", "--permission-mode", "acceptEdits", "--continue"],
+        )
+        return result.returncode
+
     else:
-        os.execvp("codex", ["codex"])
+        # Codex: resume previous session if we have a saved ID
+        session_id = _load_codex_session(relay_dir)
+        if session_id:
+            command = ["codex", "resume", session_id]
+        else:
+            command = ["codex"]
+
+        # Use script to record output so we can extract the new session ID
+        # while still showing the full terminal UI to the user
+        import tempfile, platform
+        session_log = None
+        if platform.system() in ("Darwin", "Linux"):
+            try:
+                tf = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+                session_log = tf.name
+                tf.close()
+                result = subprocess.run(
+                    ["script", "-q", session_log] + command,
+                )
+            except Exception:
+                session_log = None
+                result = subprocess.run(command)
+        else:
+            result = subprocess.run(command)
+
+        # Extract and save new session ID from the log
+        if session_log and relay_dir:
+            try:
+                with open(session_log, "rb") as f:
+                    content = f.read().decode("utf-8", errors="replace")
+                m = _re.search(r"codex resume ([a-f0-9-]{36})", content)
+                if m:
+                    _save_codex_session(relay_dir, m.group(1))
+            except Exception:
+                pass
+            try:
+                os.unlink(session_log)
+            except Exception:
+                pass
+
+        return result.returncode
+
+
+def _load_codex_session(relay_dir: Path | None) -> str | None:
+    if not relay_dir:
+        return None
+    p = relay_dir / "codex-session.json"
+    if not p.exists():
+        return None
+    try:
+        import json as _j
+        return _j.loads(p.read_text())["session_id"]
+    except Exception:
+        return None
+
+
+def _save_codex_session(relay_dir: Path, session_id: str) -> None:
+    import json as _j
+    p = relay_dir / "codex-session.json"
+    p.write_text(_j.dumps({"session_id": session_id}, indent=2))
+
+
+# Keep exec_agent as a thin alias for backward compat
+def exec_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None) -> None:
+    run_agent(agent, prompt, cwd, relay_dir=relay_dir)
 
 
 def capture_agent_output(agent: str, prompt: str, cwd: Path) -> tuple[int, str]:
