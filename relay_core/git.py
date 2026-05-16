@@ -89,31 +89,108 @@ def has_uncommitted_changes(repo: RepoState) -> bool:
 
 
 def exec_agent(agent: str, prompt: str, cwd: Path) -> None:
-    """Replace the current Relay process entirely with Claude or Codex.
+    """Launch Claude or Codex in native interactive mode and auto-type the task.
 
-    Both agents open in their fully native interactive modes — exactly
-    as if the user typed 'claude' or 'codex' themselves. No subcommands,
-    no flags that change output behaviour, no file dumping.
+    Uses pty.fork() so the agent gets a real terminal (full streaming UI,
+    native look and feel). Watches the output for the agent's input prompt,
+    then writes the task automatically — user doesn't have to paste anything.
 
-    The task is copied to the clipboard so the user can paste it instantly.
+    Claude prompt indicator: ❯  (U+276F, UTF-8: e2 9d af)
+    Codex prompt indicator:  >
     """
-    import subprocess as _sp
-
-    # Copy task to clipboard (macOS pbcopy / Linux xclip)
-    try:
-        _sp.run(["pbcopy"], input=prompt.encode(), check=False)
-    except FileNotFoundError:
-        try:
-            _sp.run(["xclip", "-selection", "clipboard"],
-                    input=prompt.encode(), check=False)
-        except FileNotFoundError:
-            pass
+    import select
+    import sys
+    import termios
+    import time
+    import tty
 
     os.chdir(str(cwd))
+
     if agent == "claude":
-        os.execvp("claude", ["claude", "--permission-mode", "acceptEdits"])
+        command = ["claude", "--permission-mode", "acceptEdits"]
+        # ❯ is Claude's input caret — signals it's ready for input
+        prompt_bytes = "❯".encode("utf-8")
     else:
-        os.execvp("codex", ["codex"])
+        command = ["codex"]
+        prompt_bytes = b"> "
+
+    try:
+        import pty
+        pid, master_fd = pty.fork()
+    except (ImportError, OSError):
+        # PTY not available — fall back to plain exec (user pastes manually)
+        os.execvp(command[0], command)
+        return  # never reached
+
+    if pid == 0:
+        # Child — become the agent
+        try:
+            os.execvp(command[0], command)
+        except Exception:
+            os._exit(1)
+
+    # Parent — bridge PTY ↔ real terminal, auto-type task on prompt detection
+    old_settings = None
+    try:
+        old_settings = termios.tcgetattr(sys.stdin.fileno())
+        tty.setraw(sys.stdin.fileno())
+    except Exception:
+        pass
+
+    task_sent = False
+    buf = b""
+
+    try:
+        while True:
+            try:
+                r, _, _ = select.select([master_fd, sys.stdin], [], [], 0.05)
+            except (ValueError, OSError):
+                break
+
+            if master_fd in r:
+                try:
+                    data = os.read(master_fd, 4096)
+                    if not data:
+                        break
+                    os.write(sys.stdout.fileno(), data)
+                    sys.stdout.flush()
+
+                    if not task_sent:
+                        buf += data
+                        # Keep only last 512 bytes to avoid unbounded growth
+                        buf = buf[-512:]
+                        if prompt_bytes in buf:
+                            # Small delay so the prompt renders fully
+                            time.sleep(0.05)
+                            os.write(master_fd, prompt.encode("utf-8") + b"\n")
+                            task_sent = True
+                            buf = b""
+                except OSError:
+                    break
+
+            if sys.stdin in r:
+                try:
+                    data = os.read(sys.stdin.fileno(), 4096)
+                    if data:
+                        os.write(master_fd, data)
+                except OSError:
+                    break
+
+    finally:
+        if old_settings:
+            try:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
+            except Exception:
+                pass
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+
+    try:
+        os.waitpid(pid, 0)
+    except ChildProcessError:
+        pass
 
 
 def capture_agent_output(agent: str, prompt: str, cwd: Path) -> tuple[int, str]:
