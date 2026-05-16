@@ -429,6 +429,43 @@ def json_inline(d: dict) -> str:
     return "  ".join(parts) or "[dim]{}[/dim]"
 
 
+def show_review_output(agent: str, output: str, exit_code: int) -> None:
+    """Display captured review output in a clean panel instead of raw terminal dump."""
+    from relay_core.utils import normalize_agent_name
+    name = normalize_agent_name(agent)
+    color = AGENT_COLORS.get(agent, "white")
+
+    # Strip internal tool noise from Codex (exec lines, file reads, etc.)
+    cleaned_lines = []
+    skip_prefixes = ("exec\n", "/bin/", "succeeded in", "exited ", " succeeded", " failed")
+    in_noise_block = False
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip Codex internal exec/tool output noise
+        if any(stripped.startswith(p) for p in ("exec", "/bin/zsh", "/bin/bash", "succeeded in", "exited ")):
+            in_noise_block = True
+            continue
+        if in_noise_block and not stripped.startswith(name) and len(stripped) > 200:
+            continue
+        in_noise_block = False
+        cleaned_lines.append(line)
+
+    cleaned = "\n".join(cleaned_lines).strip()
+    if not cleaned:
+        cleaned = output.strip() or "No review output captured."
+
+    border = "green" if exit_code == 0 else "yellow"
+    console.print()
+    console.print(Panel(
+        cleaned,
+        title=f"[{color}]{name} Review Findings[/{color}]",
+        border_style=border,
+        padding=(1, 2),
+    ))
+
+
 def show_install_hints(missing: list[str]) -> None:
     from relay_core.constants import INSTALL_HINTS
     lines = []

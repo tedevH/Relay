@@ -93,7 +93,21 @@ def build_agent_command(agent: str, prompt: str) -> list[str]:
     return ["codex", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", prompt]
 
 
-def stream_subprocess(command: list[str], cwd: Path) -> tuple[int, str]:
+def stream_subprocess(command: list[str], cwd: Path, quiet: bool = False) -> tuple[int, str]:
+    """Run a subprocess and stream its output.
+
+    quiet=True: suppress all live output, just capture and return.
+                Used for review/audit where output is shown in a panel afterward.
+    quiet=False: stream each line live with a spinner shown while waiting.
+    """
+    import threading
+    import time
+
+    from rich.live import Live
+    from rich.spinner import Spinner
+    from rich.text import Text
+    from relay_core.tui import console, stream_line
+
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
@@ -102,11 +116,43 @@ def stream_subprocess(command: list[str], cwd: Path) -> tuple[int, str]:
         text=True,
         bufsize=1,
     )
-    captured: list[str] = []
     assert process.stdout is not None
-    for line in process.stdout:
-        captured.append(line)
-        from relay_core.tui import stream_line
-        stream_line(line.rstrip())
+
+    output_lines: list[str] = []
+    reading_done = threading.Event()
+
+    def _reader() -> None:
+        for line in process.stdout:  # type: ignore[union-attr]
+            output_lines.append(line)
+        reading_done.set()
+
+    reader = threading.Thread(target=_reader, daemon=True)
+    reader.start()
+
+    start = time.time()
+    last_idx = 0
+    agent_name = "Claude" if "claude" in command[0] else "Codex"
+
+    with Live(console=console, refresh_per_second=10) as live:
+        while not reading_done.is_set() or last_idx < len(output_lines):
+            # Drain new lines
+            while last_idx < len(output_lines):
+                line = output_lines[last_idx].rstrip()
+                last_idx += 1
+                if not quiet and line:
+                    live.console.print(line, highlight=False, markup=False)
+
+            elapsed = int(time.time() - start)
+            if not reading_done.is_set():
+                live.update(
+                    Text(f"  ⏳ {agent_name} is running... {elapsed}s", style="dim")
+                )
+            else:
+                live.update(Text(""))
+
+            if not reading_done.is_set():
+                time.sleep(0.1)
+
+    reader.join()
     process.wait()
-    return process.returncode, "".join(captured)
+    return process.returncode, "".join(output_lines)

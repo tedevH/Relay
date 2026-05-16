@@ -150,8 +150,14 @@ def execute_agent_run(
     tui.show_routing_decision(decision)
     tui.show_agent_running(command)
 
-    exit_code, output = stream_subprocess(command, cwd=repo.repo_root or repo.cwd)
-    tui.show_agent_completion_note(agent, output, exit_code)
+    # review/audit: run quietly and show output in a clean panel
+    quiet_mode = prompt_type in {"review", "chain-review", "audit"}
+    exit_code, output = stream_subprocess(command, cwd=repo.repo_root or repo.cwd, quiet=quiet_mode)
+
+    if quiet_mode:
+        tui.show_review_output(agent, output, exit_code)
+    else:
+        tui.show_agent_completion_note(agent, output, exit_code)
 
     rate_limited = detect_rate_limit(output)
     if rate_limited:
