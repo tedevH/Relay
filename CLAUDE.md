@@ -15,3 +15,18 @@
 - `relay_dashboard/templates/index.html`
 
 Go directly to these files. Skip broad codebase exploration.
+
+## Relay Memory
+
+**Read `.relay/context.md` immediately.** It contains:
+- The current task
+- Relevant symbols and their exact file locations
+- Active workstreams and their status
+- The specific files most likely to need editing
+
+**Do not explore the codebase broadly.** Go directly to the files listed in `.relay/context.md`.
+
+```
+## Repo
+Framework: python · python
+```

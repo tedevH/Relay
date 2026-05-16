@@ -73,7 +73,34 @@ def run_post_commit_hook(repo: RepoState) -> None:
         high_risk = [f for f, r in risk_levels.items() if r == "HIGH"]
 
         # Check if this commit was triggered by a relay task
-        pending_task = _read_pending_task(repo)
+        pending = _read_pending_task_full(repo)
+        pending_task = pending.get("task", "") if pending else ""
+        pending_agent = pending.get("agent", "unknown") if pending else "manual"
+
+        # ── Intelligence: extract symbols and classify workstream ──
+        from relay_core.intelligence import (
+            extract_symbols_from_diff, classify_workstream,
+            merge_symbols, update_workstream,
+        )
+
+        new_symbols = extract_symbols_from_diff(diff_text)
+        symbol_names = list(new_symbols.keys())
+        ws_name = classify_workstream(pending_task or commit_msg, files, symbol_names)
+
+        # Persist symbols
+        merge_symbols(repo, new_symbols)
+
+        # Persist workstream
+        if pending_task or commit_msg:
+            update_workstream(
+                repo,
+                ws_name=ws_name,
+                task=pending_task or commit_msg,
+                agent=pending_agent,
+                files=files,
+                new_symbols=symbol_names,
+                commit_msg=commit_msg,
+            )
 
         entry: dict[str, Any] = {
             "command_type": "commit",
@@ -84,9 +111,11 @@ def run_post_commit_hook(repo: RepoState) -> None:
             "risk_levels": risk_levels,
             "high_risk_files": high_risk,
             "diff_stat": diff_stat,
+            "symbols_added": symbol_names[:20],
+            "workstream": ws_name,
             "success": True,
             "source": "relay-task" if pending_task else "manual",
-            "original_task": pending_task or "",
+            "original_task": pending_task,
         }
 
         # Save diff
@@ -128,14 +157,18 @@ def save_pending_task(repo: RepoState, task: str, agent: str) -> None:
 
 
 def _read_pending_task(repo: RepoState) -> str:
+    d = _read_pending_task_full(repo)
+    return d.get("task", "") if d else ""
+
+
+def _read_pending_task_full(repo: RepoState) -> dict | None:
     pending_path = repo.relay_dir / "pending-task.json" if repo.relay_dir else None
     if not pending_path or not pending_path.exists():
-        return ""
+        return None
     try:
-        data = json.loads(pending_path.read_text(encoding="utf-8"))
-        return data.get("task", "")
+        return json.loads(pending_path.read_text(encoding="utf-8"))
     except Exception:
-        return ""
+        return None
 
 
 def _clear_pending_task(repo: RepoState) -> None:

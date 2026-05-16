@@ -72,10 +72,8 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     from relay_core.hooks import save_pending_task
     save_pending_task(repo, task, agent)
 
-    # Update CLAUDE.md and context.md before handing off so Claude reads
-    # project memory immediately without exploring the codebase first
-    _inject_context(repo, task)
-    _update_claude_md(repo, task)
+    # Generate compressed structured context and write CLAUDE.md + context.md
+    _write_context(repo, task)
 
     cwd = repo.repo_root or repo.cwd
     tui.show_handoff_note(agent, task)
@@ -85,6 +83,58 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
 
     # Never reached — exec_agent replaces this process
     return 0
+
+
+def _write_context(repo: RepoState, task: str) -> None:
+    """Write compressed structured context to .relay/context.md and CLAUDE.md.
+
+    Uses the intelligence layer to produce minimal, task-relevant state:
+    relevant symbols, active workstreams, likely files.
+    Never dumps raw history or verbose logs.
+    """
+    if not repo.relay_dir or not repo.repo_root:
+        return
+
+    from relay_core.intelligence import generate_context
+    context = generate_context(repo, task)
+
+    # .relay/context.md — full structured context
+    context_lines = [
+        "# Relay Context",
+        f"Task: {task}",
+        "",
+        context,
+    ]
+    (repo.relay_dir / "context.md").write_text("\n".join(context_lines), encoding="utf-8")
+
+    # CLAUDE.md — what Claude reads on session start
+    import re as _re
+    claude_section = (
+        "## Relay Memory\n\n"
+        "**Read `.relay/context.md` immediately.** It contains:\n"
+        "- The current task\n"
+        "- Relevant symbols and their exact file locations\n"
+        "- Active workstreams and their status\n"
+        "- The specific files most likely to need editing\n\n"
+        "**Do not explore the codebase broadly.** Go directly to the files listed in `.relay/context.md`.\n\n"
+        f"```\n{context[:1500]}\n```\n"
+    )
+
+    claude_md = repo.repo_root / "CLAUDE.md"
+    if claude_md.exists():
+        existing = claude_md.read_text(encoding="utf-8")
+        if "## Relay Memory" in existing:
+            updated = _re.sub(
+                r"## Relay Memory.*",
+                claude_section.rstrip(),
+                existing,
+                flags=_re.DOTALL,
+            )
+            claude_md.write_text(updated, encoding="utf-8")
+        else:
+            claude_md.write_text(existing.rstrip() + "\n\n" + claude_section, encoding="utf-8")
+    else:
+        claude_md.write_text(claude_section, encoding="utf-8")
 
 
 def _inject_context(repo: RepoState, task: str) -> None:

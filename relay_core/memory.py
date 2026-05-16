@@ -66,6 +66,10 @@ def ensure_relay_files(repo: RepoState) -> None:
         repo.config_path.write_text(json.dumps(default_config(), indent=2) + "\n", encoding="utf-8")
     if not repo.memory_path.exists():
         repo.memory_path.write_text(json.dumps(default_memory(), indent=2) + "\n", encoding="utf-8")
+    if repo.symbols_path and not repo.symbols_path.exists():
+        repo.symbols_path.write_text("{}\n", encoding="utf-8")
+    if repo.workstreams_path and not repo.workstreams_path.exists():
+        repo.workstreams_path.write_text("{}\n", encoding="utf-8")
 
 
 def load_config(repo: RepoState) -> dict[str, Any]:
