@@ -517,12 +517,21 @@ def show_review_output(agent: str, output: str, exit_code: int) -> None:
     ))
 
 
-def show_handoff_note(agent: str) -> None:
+def show_handoff_note(agent: str, task: str) -> None:
     """Shown just before Relay hands off to Claude/Codex."""
     from relay_core.utils import normalize_agent_name
     name = normalize_agent_name(agent)
     color = AGENT_COLORS.get(agent, "white")
-    console.print(f"\n[{color}]Handing off to {name}...[/{color}] [dim]Relay will log everything after you commit.[/dim]\n")
+
+    console.print()
+    console.print(Panel(
+        f"[dim]Task copied to clipboard →[/dim] [bold white]{task}[/bold white]\n"
+        f"[dim]Paste it when {name} opens.[/dim]",
+        title=f"[{color}]Opening {name}[/{color}]",
+        border_style=color.replace("bold ", ""),
+        padding=(0, 1),
+    ))
+    console.print()
 
 
 def show_context(tasks: list[dict], mem: dict, profile: dict | None) -> None:

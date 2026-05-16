@@ -91,21 +91,29 @@ def has_uncommitted_changes(repo: RepoState) -> bool:
 def exec_agent(agent: str, prompt: str, cwd: Path) -> None:
     """Replace the current Relay process entirely with Claude or Codex.
 
-    Uses os.execvp so the agent gets a completely native terminal — full
-    streaming UI, no wrapper, no piping. Relay is gone after this call.
-    The agent runs exactly as if the user typed the command themselves.
+    Both agents open in their fully native interactive modes — exactly
+    as if the user typed 'claude' or 'codex' themselves. No subcommands,
+    no flags that change output behaviour, no file dumping.
 
-    For Claude: opens in interactive mode so the user gets full streaming.
-               The prompt is written to .relay/pending-task.txt so Claude
-               can read it via CLAUDE.md context injection.
-    For Codex:  passes prompt as a CLI arg (Codex streams natively).
+    The task is copied to the clipboard so the user can paste it instantly.
     """
+    import subprocess as _sp
+
+    # Copy task to clipboard (macOS pbcopy / Linux xclip)
+    try:
+        _sp.run(["pbcopy"], input=prompt.encode(), check=False)
+    except FileNotFoundError:
+        try:
+            _sp.run(["xclip", "-selection", "clipboard"],
+                    input=prompt.encode(), check=False)
+        except FileNotFoundError:
+            pass
+
     os.chdir(str(cwd))
     if agent == "claude":
         os.execvp("claude", ["claude", "--permission-mode", "acceptEdits"])
     else:
-        os.execvp("codex", ["codex", "--ask-for-approval", "never",
-                             "exec", "--sandbox", "workspace-write", prompt])
+        os.execvp("codex", ["codex"])
 
 
 def capture_agent_output(agent: str, prompt: str, cwd: Path) -> tuple[int, str]:

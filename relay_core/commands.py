@@ -75,7 +75,7 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     _inject_context(repo, task)
 
     cwd = repo.repo_root or repo.cwd
-    tui.show_handoff_note(agent)
+    tui.show_handoff_note(agent, task)
 
     # Hand off completely — Relay process is replaced by Claude/Codex
     exec_agent(agent, task, cwd)

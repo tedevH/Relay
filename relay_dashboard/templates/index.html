@@ -33,6 +33,37 @@
   .sidebar { width: 200px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px 0; display: flex; flex-direction: column; flex-shrink: 0; }
   .main { flex: 1; padding: 28px; overflow-x: hidden; }
 
+  .topbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+
+  .login-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 96px;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: #000;
+    padding: 9px 14px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: inherit;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+  }
+
+  .login-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(0, 212, 170, 0.2);
+  }
+
   /* Sidebar */
   .logo { padding: 0 20px 24px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
   .logo-title { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 1px; }
@@ -177,6 +208,8 @@
     .grid-2, .grid-3 { grid-template-columns: 1fr; }
     .diff-layout { grid-template-columns: 1fr; }
     .diff-files { max-height: 160px; border-right: none; border-bottom: 1px solid var(--border); }
+    .topbar { margin-bottom: 16px; }
+    .login-btn { width: 100%; }
   }
 </style>
 </head>
@@ -203,6 +236,9 @@
 
   <!-- Main -->
   <div class="main">
+    <div class="topbar">
+      <button class="login-btn" type="button">Login</button>
+    </div>
 
     <!-- Overview -->
     <div id="page-overview" class="page active">
