@@ -674,6 +674,7 @@ def task_entry(
 
 def print_relay_home(repo: RepoState) -> None:
     print("Relay")
+    print("Routes work, keeps context, and helps you safely review, commit, and push.")
     print(f"Version: {VERSION}")
     print(f"Working directory: {repo.cwd}")
     print(f"Git repo: {repo.repo_root if repo.repo_root else 'not detected'}")
@@ -683,15 +684,17 @@ def print_relay_home(repo: RepoState) -> None:
     print(f"Codex CLI: {'installed' if cli_available('codex') else 'missing'}")
     print(f"Git: {'installed' if cli_available('git') else 'missing'}")
     print()
-    print("Commands")
+    print("Most common flow")
     print('relay "task"')
+    print("relay review   (or: relay r)")
+    print("relay summary  (or: relay s)")
+    print("relay commit   (or: relay c)")
+    print("relay push     (or: relay p)")
+    print()
+    print("More commands")
     print('relay @claude "task"')
     print('relay @codex "task"')
     print('relay continue "task"')
-    print("relay review")
-    print("relay summary")
-    print("relay commit")
-    print("relay push")
     print('relay why "task"')
     print("relay doctor")
     print("relay status")
@@ -1168,18 +1171,20 @@ def print_history(repo: RepoState) -> int:
 
 def usage() -> int:
     print("Usage:")
+    print('  relay "task"')
+    print("  relay review | relay r")
+    print("  relay summary | relay s")
+    print("  relay commit | relay c")
+    print("  relay push | relay p")
+    print()
+    print("More:")
     print("  relay")
     print("  relay doctor")
     print("  relay status")
     print('  relay why "task"')
-    print('  relay "task"')
     print('  relay @claude "task"')
     print('  relay @codex "task"')
     print('  relay continue "task"')
-    print("  relay review")
-    print("  relay summary")
-    print("  relay commit")
-    print("  relay push")
     print("  relay history")
     return 1
 
@@ -1189,6 +1194,15 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
         return "home", None
 
     command = argv[0]
+    alias_map = {
+        "r": "review",
+        "s": "summary",
+        "c": "commit",
+        "p": "push",
+        "h": "history",
+        "help": "home",
+    }
+    command = alias_map.get(command, command)
     if command in {"doctor", "status", "review", "summary", "history", "commit", "push"}:
         return command, None
 

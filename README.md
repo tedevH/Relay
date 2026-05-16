@@ -56,13 +56,25 @@ But it refuses to run live AI task workflows.
 Clone the repo, make the wrapper executable, and symlink it into your PATH:
 
 ```bash
+git clone https://github.com/tedevH/Relay.git
+cd Relay
 chmod +x relay
 mkdir -p "$HOME/.local/bin"
 ln -sf "$(pwd)/relay" "$HOME/.local/bin/relay"
-export PATH="$HOME/.local/bin:$PATH"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
-You can also run it directly:
+Relay's wrapper follows symlinks correctly, so `relay` will still find `relay.py` when installed this way.
+
+You can also skip symlinks and use a shell alias:
+
+```bash
+echo 'alias relay="$HOME/Relay/relay"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+You can still run it directly:
 
 ```bash
 ./relay
@@ -94,13 +106,15 @@ Relay also adds `.relay/` to the local repo's `.git/info/exclude` so Relay memor
 
 ### `relay`
 
-Shows a friendly setup and status screen:
+Shows the simplest workflow first:
 
-- Relay version
-- dependency status
-- git repo detection
-- available commands
-- install hints for missing tools
+- `relay "task"`
+- `relay review`
+- `relay summary`
+- `relay commit`
+- `relay push`
+
+It also shows dependency status, git repo detection, and install hints.
 
 ### `relay doctor`
 
@@ -118,12 +132,12 @@ Claude Code:
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash
+npm i -g @openai/codex
 ```
 
 Codex CLI:
 
 ```bash
-npm i -g @openai/codex
 codex
 ```
 
@@ -242,6 +256,17 @@ Prepares a git push safely.
 - suggests `git push -u origin <branch>` when upstream is missing
 - never pushes automatically after task, review, or summary
 
+## Shortcuts
+
+Relay supports a few short aliases for the commands people use most:
+
+- `relay r` for `relay review`
+- `relay s` for `relay summary`
+- `relay c` for `relay commit`
+- `relay p` for `relay push`
+
+The long forms still work and are the best ones to document for new users.
+
 ### `relay history`
 
 Shows recent local Relay tasks from `.relay/tasks.json`.
@@ -328,15 +353,11 @@ Relay warns when diffs touch risky areas like:
 ## Example Workflow
 
 ```bash
-relay
-relay doctor
 relay "make the dashboard mobile responsive"
-relay review
-relay summary
-relay commit
-relay push
-relay continue "clean up the follow-up issues"
-relay history
+relay r
+relay s
+relay c
+relay p
 ```
 
 ## Troubleshooting
