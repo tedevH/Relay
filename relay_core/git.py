@@ -93,6 +93,85 @@ def build_agent_command(agent: str, prompt: str) -> list[str]:
     return ["codex", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", prompt]
 
 
+def _run_with_pty(command: list[str], cwd: Path) -> int:
+    """Run command inside a pseudo-terminal so it gets a real interactive TTY.
+
+    Without a PTY, Claude Code detects it's not in a terminal and switches to
+    plain print mode — no thinking steps, no tool calls, output only at the end.
+    With a PTY it behaves exactly as if the user typed the command themselves.
+    """
+    import os
+    import select
+    import sys
+    import termios
+    import tty
+
+    try:
+        import pty
+        pid, master_fd = pty.fork()
+    except (ImportError, OSError):
+        # PTY unavailable (e.g. Windows) — fall back to plain run
+        result = subprocess.run(command, cwd=str(cwd))
+        return result.returncode
+
+    if pid == 0:
+        # Child process — become the agent
+        try:
+            os.chdir(str(cwd))
+            os.execvp(command[0], command)
+        except Exception:
+            os._exit(1)
+
+    # Parent process — bridge PTY ↔ our real terminal
+    old_settings = None
+    try:
+        old_settings = termios.tcgetattr(sys.stdin.fileno())
+        tty.setraw(sys.stdin.fileno())
+    except Exception:
+        pass
+
+    try:
+        while True:
+            try:
+                r, _, _ = select.select([master_fd, sys.stdin], [], [], 0.05)
+            except (ValueError, OSError):
+                break
+
+            if master_fd in r:
+                try:
+                    data = os.read(master_fd, 4096)
+                    if data:
+                        os.write(sys.stdout.fileno(), data)
+                        sys.stdout.flush()
+                except OSError:
+                    break  # child exited
+
+            if sys.stdin in r:
+                try:
+                    data = os.read(sys.stdin.fileno(), 4096)
+                    if data:
+                        os.write(master_fd, data)
+                except OSError:
+                    break
+
+    finally:
+        if old_settings:
+            try:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
+            except Exception:
+                pass
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+
+    try:
+        _, status = os.waitpid(pid, 0)
+        return os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+    except ChildProcessError:
+        return 0
+
+
 def stream_subprocess(command: list[str], cwd: Path, quiet: bool = False) -> tuple[int, str]:
     """Run a subprocess.
 
@@ -107,10 +186,10 @@ def stream_subprocess(command: list[str], cwd: Path, quiet: bool = False) -> tup
         Used when we need to process and reformat the output.
     """
     if not quiet:
-        # Full passthrough — give the agent a real terminal, zero interference.
-        # This is what makes Claude Code show its native thinking UI.
-        result = subprocess.run(command, cwd=str(cwd))
-        return result.returncode, ""
+        # Run inside a PTY so the agent sees a real interactive terminal.
+        # This is what makes Claude Code show its native thinking UI —
+        # live tool calls, file reads, spinners — exactly as if run directly.
+        return _run_with_pty(command, cwd), ""
 
     # quiet=True: capture output for panel display (review / audit)
     import threading
