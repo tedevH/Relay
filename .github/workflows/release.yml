@@ -21,6 +21,8 @@ jobs:
             asset: relay-darwin-arm64
           - os: ubuntu-latest
             asset: relay-linux-amd64
+          - os: windows-latest
+            asset: relay-windows-amd64.exe
 
     steps:
       - uses: actions/checkout@v4

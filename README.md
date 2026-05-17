@@ -107,6 +107,7 @@ The GitHub Actions release workflow builds:
 ```text
 relay-darwin-arm64
 relay-linux-amd64
+relay-windows-amd64.exe
 ```
 
 ## Repo Memory

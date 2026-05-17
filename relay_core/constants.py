@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 
-VERSION = "0.5.2"
+VERSION = "0.5.3"
 MAX_HISTORY_DISPLAY = 20
 MAX_HANDOFF_WORDS = 250
 MAX_DIFF_PROMPT_CHARS = 6000

@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.3
+
+- Restored the Windows AMD64 release binary while keeping Intel Mac disabled.
+
 ## v0.5.2
 
 - Simplified the release matrix to Apple Silicon macOS and Linux binaries for faster first releases.
