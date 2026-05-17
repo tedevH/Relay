@@ -82,7 +82,12 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     # Developer watches the timer, not a blank terminal.
     # Output shown in a clean panel when done.
     from relay_core.git import run_agent
-    exit_code, output = run_agent(agent, task, cwd, relay_dir=repo.relay_dir)
+    exit_code, output, resumed = run_agent(agent, task, cwd, relay_dir=repo.relay_dir)
+
+    # Show session continuity notice — only when actually resuming
+    if resumed:
+        from relay_core.utils import normalize_agent_name
+        tui.show_info(f"↩  Resumed previous {normalize_agent_name(agent)} session — full prior context available")
 
     # Show result
     files = changed_files(repo)

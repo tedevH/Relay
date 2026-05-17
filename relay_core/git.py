@@ -88,7 +88,7 @@ def has_uncommitted_changes(repo: RepoState) -> bool:
     return bool(git_status_lines(repo))
 
 
-def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None) -> tuple[int, str]:
+def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None) -> tuple[int, str, bool]:
     """Run Claude or Codex non-interactively with a live elapsed-time counter.
 
     The developer doesn't need to watch or interact with the terminal.
@@ -107,11 +107,13 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
     os.chdir(str(cwd))
 
     if agent == "claude":
+        continued = _has_claude_session(cwd)
         command = [
             "claude", "--permission-mode", "acceptEdits",
             "--continue", "-p", prompt,
         ]
     else:
+        continued = False
         session_id = _load_codex_session(relay_dir)
         if session_id:
             # Resume with context then run prompt in exec mode
@@ -177,7 +179,20 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
         if new_id and relay_dir:
             _save_codex_session(relay_dir, new_id)
 
-    return process.returncode, "".join(output_lines)
+    resumed = continued if agent == "claude" else (_load_codex_session(relay_dir) is not None)
+    return process.returncode, "".join(output_lines), resumed
+
+
+def _has_claude_session(cwd: Path) -> bool:
+    """Check if Claude has a previous session for this directory.
+    Claude names project dirs by replacing / with - (keeping the leading -).
+    e.g. /Users/foo/Relay → -Users-foo-Relay
+    """
+    slug = str(cwd).replace("/", "-")  # keeps leading - from root /
+    project_dir = Path.home() / ".claude" / "projects" / slug
+    if not project_dir.exists():
+        return False
+    return any(project_dir.glob("*.jsonl"))
 
 
 def _latest_codex_session_id() -> str | None:
