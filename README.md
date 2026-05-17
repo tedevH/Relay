@@ -1,8 +1,8 @@
 # Relay
 
-**Persistent memory for Claude Code and Codex CLI.**
+**Persistent memory and autonomous execution for Claude Code and Codex CLI.**
 
-AI coding agents forget everything when you close the terminal. Relay fixes that.
+AI coding agents forget everything when you close the terminal. Relay fixes that — and goes further, running tasks end-to-end without you watching.
 
 Every task you run gets logged. Every commit is tracked. Before every session, Relay injects what your agent needs to know — which files are active, what changed recently, what decisions were made — so it stops starting cold.
 
@@ -28,6 +28,8 @@ Relay sits between you and your AI agents. It builds a memory of your project ov
 - **Injects context before every session** — agents read `.relay/context.md` on startup and know your project without exploring it
 
 The result: your agent starts sessions already knowing what changed, what's risky, and what the active workstream is.
+
+Relay also runs fully autonomous loops — give it a goal, it plans, executes, verifies, diagnoses failures, and retries until done. No human involvement between steps.
 
 ---
 
