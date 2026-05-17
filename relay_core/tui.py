@@ -27,54 +27,120 @@ def _agent_badge(agent: str) -> Text:
 def show_home(repo: Any, missing_deps: list[str]) -> None:
     from relay_core.utils import cli_available
 
+    is_first_time = not repo.in_git_repo or (
+        repo.relay_dir is not None and not repo.relay_dir.exists()
+    )
+    all_deps_ok = not missing_deps
+
+    console.print()
+
+    # ── Title ──────────────────────────────────────────────────────
     title = Text()
     title.append("⚡ Relay ", style="bold white")
-    title.append(f"v{VERSION}", style="dim white")
+    title.append(f"v{VERSION}  ", style="dim white")
+    title.append("persistent memory for Claude Code + Codex", style="dim")
+    console.print(Panel(title, border_style="cyan", padding=(0, 1)))
 
+    # ── Status ─────────────────────────────────────────────────────
     status_table = Table(box=None, show_header=False, padding=(0, 1))
-    status_table.add_column(style="dim white")
+    status_table.add_column(style="dim white", width=16)
     status_table.add_column()
 
     for dep in ("claude", "codex", "git"):
         ok = cli_available(dep)
         label = {"claude": "Claude Code", "codex": "Codex CLI", "git": "Git"}[dep]
-        status_table.add_row(label, Text("✓ installed", style="bold green") if ok else Text("✗ missing", style="bold red"))
-
-    git_row = f"[dim]{repo.repo_root}[/dim]" if repo.in_git_repo else "[dim red]not detected[/dim red]"
+        status_table.add_row(
+            label,
+            Text("✓ installed", style="bold green") if ok else Text("✗ missing", style="bold red"),
+        )
+    git_row = f"[dim]{repo.repo_root}[/dim]" if repo.in_git_repo else "[yellow]not detected — cd into a git repo[/yellow]"
     status_table.add_row("Git repo", git_row)
 
-    cmd_table = Table(box=None, show_header=False, padding=(0, 1))
-    cmd_table.add_column(style="bold cyan", no_wrap=True)
-    cmd_table.add_column(style="dim white")
-    commands = [
-        ('relay "task"', "route to Claude or Codex — full native terminal handoff"),
-        ("relay auto \"task\" --until \"condition\"", "autonomous loop — execute, verify, diagnose, retry"),
-        ("relay plan \"goal\"", "decompose goal into subtasks and execute each"),
-        ("relay init", "set up git hooks + memory for this repo"),
-        ("relay context", "show what Relay knows about this project"),
-        ("relay digest", "full project health report"),
-        ("relay review  (r)", "instant local review — risk, findings, commit msg"),
-        ("relay ai-review", "deep AI review — uses tokens, run selectively"),
-        ("relay summary (s)", "diff summary with risk levels"),
-        ("relay commit  (c)", "safe commit with confirmation"),
-        ("relay push    (p)", "safe push with confirmation"),
-        ("relay why \"task\"", "explain routing without running"),
-        ("relay history", "view recent task history"),
-        ("relay doctor", "check environment and dependencies"),
-    ]
-    for cmd, desc in commands:
-        cmd_table.add_row(cmd, desc)
-
-    console.print()
-    console.print(Panel(title, border_style="cyan", padding=(0, 1)))
+    relay_init = repo.relay_dir is not None and repo.relay_dir.exists()
+    status_table.add_row(
+        "Relay memory",
+        Text("✓ active", style="bold green") if relay_init else Text("not set up — run relay init", style="yellow"),
+    )
     console.print(Panel(status_table, title="[bold white]Status[/bold white]", border_style="dim", padding=(0, 1)))
-    console.print(Panel(cmd_table, title="[bold white]Commands[/bold white]", border_style="dim", padding=(0, 1)))
 
+    # ── First-time onboarding ───────────────────────────────────────
     if missing_deps:
         show_install_hints(missing_deps)
+        return
 
+    if is_first_time:
+        steps = Text()
+        steps.append("Relay gives Claude Code memory across sessions.\n", style="dim")
+        steps.append("Every task you run gets logged. Every commit is tracked.\n", style="dim")
+        steps.append("Claude starts each session already knowing your project.\n\n", style="dim")
+
+        steps.append("Step 1  ", style="bold cyan")
+        steps.append("cd into your project\n", style="white")
+
+        steps.append("Step 2  ", style="bold cyan")
+        steps.append("relay init", style="bold white")
+        steps.append("   — sets up memory and git hooks\n", style="dim")
+
+        steps.append("Step 3  ", style="bold cyan")
+        steps.append('relay "your task"', style="bold white")
+        steps.append("   — routes to Claude or Codex automatically\n", style="dim")
+
+        steps.append("Step 4  ", style="bold cyan")
+        steps.append("relay review", style="bold white")
+        steps.append("   — instant risk check before committing\n", style="dim")
+
+        steps.append("Step 5  ", style="bold cyan")
+        steps.append("relay commit", style="bold white")
+        steps.append("   — safe commit with confirmation", style="dim")
+
+        console.print(Panel(
+            steps,
+            title="[bold white]Getting Started[/bold white]",
+            border_style="cyan", padding=(1, 2),
+        ))
+        console.print()
+        console.print("[dim]Type 'relay init' to set up your project, or type any task to get started.[/dim]")
+        return
+
+    # ── Returning user — daily workflow ────────────────────────────
+    workflow = Text()
+    workflow.append("Daily workflow\n\n", style="bold white")
+
+    workflow.append('relay "task"         ', style="bold cyan")
+    workflow.append("→ Claude or Codex runs with full project memory\n", style="dim")
+
+    workflow.append("relay review         ", style="bold cyan")
+    workflow.append("→ instant risk check (free, no tokens)\n", style="dim")
+
+    workflow.append("relay commit         ", style="bold cyan")
+    workflow.append("→ safe commit with smart message\n", style="dim")
+
+    workflow.append("relay push           ", style="bold cyan")
+    workflow.append("→ push with confirmation\n\n", style="dim")
+
+    workflow.append("Power commands\n\n", style="bold white")
+
+    workflow.append('relay auto "task" --until "condition"   ', style="bold cyan")
+    workflow.append("autonomous loop\n", style="dim")
+
+    workflow.append('relay plan "goal"                       ', style="bold cyan")
+    workflow.append("decompose + execute\n", style="dim")
+
+    workflow.append("relay context                           ", style="bold cyan")
+    workflow.append("what Relay knows about this project\n", style="dim")
+
+    workflow.append("relay digest                            ", style="bold cyan")
+    workflow.append("full project health report\n", style="dim")
+
+    workflow.append("relay ai-review                         ", style="bold cyan")
+    workflow.append("deep AI code review\n", style="dim")
+
+    workflow.append("relay doctor                            ", style="bold cyan")
+    workflow.append("check dependencies", style="dim")
+
+    console.print(Panel(workflow, title="[bold white]Commands[/bold white]", border_style="dim", padding=(0, 2)))
     console.print()
-    console.print("[dim]Type a task or command below. 'exit' to quit.[/dim]")
+    console.print("[dim]Type a task to run it, or type any command above.[/dim]")
 
 
 def show_doctor(repo: Any, deps: list[tuple[str, bool]], missing: list[str]) -> None:
