@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relay-ai-brain"
+version = "0.5.0"
+description = "Local-first automation brain for Claude Code, Codex CLI, and Git"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "rich>=13.0.0",
+  "flask>=3.0.0",
+]
+
+[project.scripts]
+relay = "relay_core.main:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["relay_core", "relay_dashboard", "relay_ci"]
+
+[tool.setuptools.package-data]
+relay_dashboard = ["templates/*.html"]
+relay_ci = ["relay-audit.yml"]

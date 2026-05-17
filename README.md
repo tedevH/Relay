@@ -34,10 +34,11 @@ Relay only shells out to software you already have installed locally.
 
 ## Requirements
 
-- Python 3.10+
 - Claude Code CLI available as `claude`
 - Codex CLI available as `codex`
 - Git available as `git`
+
+The standalone Relay installer does not require users to install Python, pipx, or git just to download Relay. Live AI workflows still need Claude Code, Codex CLI, and Git because Relay shells out to those tools.
 
 Relay uses these local subprocess commands:
 
@@ -56,31 +57,58 @@ But it refuses to run live AI task workflows.
 
 ## Install
 
-Clone the repo, make the wrapper executable, and symlink it into your PATH:
+Fastest install for macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
+```
+
+The installer downloads the correct standalone binary from the latest GitHub Release and places it in:
+
+```text
+~/.local/bin/relay
+```
+
+If the repository or release is private, authenticate both the installer fetch and the release download:
+
+```bash
+export GITHUB_TOKEN=ghp_your_token
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
+```
+
+You can choose a different install directory:
+
+```bash
+RELAY_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
+```
+
+Source install for contributors:
 
 ```bash
 git clone https://github.com/tedevH/Relay.git
 cd Relay
-chmod +x relay
-mkdir -p "$HOME/.local/bin"
-ln -sf "$(pwd)/relay" "$HOME/.local/bin/relay"
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
+python3 -m pip install -e .
+relay --version
 ```
 
-Relay's wrapper follows symlinks correctly, so `relay` will still find `relay.py` when installed this way.
+## Publishing Releases
 
-You can also skip symlinks and use a shell alias:
+Relay ships as standalone binaries through GitHub Releases.
+
+To publish a release:
 
 ```bash
-echo 'alias relay="$HOME/Relay/relay"' >> ~/.zshrc
-source ~/.zshrc
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
-You can still run it directly:
+The GitHub Actions release workflow builds:
 
-```bash
-./relay
+```text
+relay-darwin-arm64
+relay-darwin-amd64
+relay-linux-amd64
+relay-windows-amd64.exe
 ```
 
 ## Repo Memory

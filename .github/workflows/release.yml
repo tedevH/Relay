@@ -1,0 +1,88 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            asset: relay-darwin-arm64
+          - os: macos-13
+            asset: relay-darwin-amd64
+          - os: ubuntu-latest
+            asset: relay-linux-amd64
+          - os: windows-latest
+            asset: relay-windows-amd64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build binary
+        run: pyinstaller --clean --noconfirm relay.spec
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mkdir -p dist/release
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp dist/relay.exe "dist/release/${{ matrix.asset }}"
+          else
+            cp dist/relay "dist/release/${{ matrix.asset }}"
+            chmod +x "dist/release/${{ matrix.asset }}"
+          fi
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ./dist/release/${{ matrix.asset }} --version
+          else
+            ./dist/release/${{ matrix.asset }} --version
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/release/${{ matrix.asset }}
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect assets
+        run: |
+          mkdir -p release
+          find artifacts -maxdepth 3 -type f -exec cp {} release/ \;
+          ls -la release
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

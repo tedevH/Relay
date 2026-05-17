@@ -2,3 +2,6 @@ __pycache__/
 .relay/
 .relay-test/
 test-bin/
+build/
+dist/
+*.spec.bak
