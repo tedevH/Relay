@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.2
+
+- Simplified the release matrix to Apple Silicon macOS and Linux binaries for faster first releases.
+
 ## v0.5.1
 
 - Removed the local dashboard surface.

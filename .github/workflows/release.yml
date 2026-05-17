@@ -19,12 +19,8 @@ jobs:
         include:
           - os: macos-14
             asset: relay-darwin-arm64
-          - os: macos-13
-            asset: relay-darwin-amd64
           - os: ubuntu-latest
             asset: relay-linux-amd64
-          - os: windows-latest
-            asset: relay-windows-amd64.exe
 
     steps:
       - uses: actions/checkout@v4

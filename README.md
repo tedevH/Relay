@@ -98,17 +98,15 @@ Relay ships as standalone binaries through GitHub Releases.
 To publish a release:
 
 ```bash
-git tag v0.5.1
-git push origin v0.5.1
+git tag v0.5.2
+git push origin v0.5.2
 ```
 
 The GitHub Actions release workflow builds:
 
 ```text
 relay-darwin-arm64
-relay-darwin-amd64
 relay-linux-amd64
-relay-windows-amd64.exe
 ```
 
 ## Repo Memory
