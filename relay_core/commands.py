@@ -23,6 +23,7 @@ from relay_core.memory import (
     latest_task, latest_agent_task, ensure_relay_files, load_config,
     load_memory, load_project_profile, update_memory_after_task,
 )
+from relay_core.outcome import build_outcome, save_outcome, load_outcome
 from relay_core.routing import route_task, scan_project
 from relay_core.diff import (
     classify_files_risk, classify_file_risk,
@@ -125,6 +126,16 @@ def run_task(
         tui.show_warnings(warnings)
 
     tui.show_result(agent, exit_code, files, "normal")
+    outcome = build_outcome(
+        repo,
+        task=task,
+        command_type="task",
+        agent=agent,
+        exit_code=exit_code,
+        verified=None,
+    )
+    save_outcome(repo, outcome)
+    tui.show_outcome(outcome)
 
     # Update memory
     from relay_core.memory import append_repo_task
@@ -692,6 +703,17 @@ def run_config(repo: RepoState) -> int:
     return 0
 
 
+def run_last(repo: RepoState) -> int:
+    if not repo.in_git_repo:
+        raise RelayError("relay last requires a git repository.")
+    outcome = load_outcome(repo)
+    if not outcome:
+        tui.show_info("No Relay outcome saved yet. Run relay go \"task\" first.")
+        return 0
+    tui.show_outcome(outcome)
+    return 0
+
+
 def run_auto_cmd(
     task: str,
     repo: RepoState,
@@ -709,6 +731,26 @@ def run_auto_cmd(
                     max_cost=max_cost, forced_agent=forced_agent,
                     mode=mode, agent_policy=agent_policy,
                     auto_commit=auto_commit, max_steps=max_steps)
+
+
+def run_go_cmd(
+    task: str,
+    repo: RepoState,
+    until: str | None = None,
+    max_retries: int = 2,
+    max_cost: float = 1.00,
+) -> int:
+    from relay_core.auto import run_auto
+    return run_auto(
+        task,
+        repo,
+        until=until,
+        max_retries=max_retries,
+        max_cost=max_cost,
+        mode="edit",
+        agent_policy="balanced",
+        auto_commit=True,
+    )
 
 
 def run_plan_cmd(goal: str, repo: RepoState, dry_run: bool = False) -> int:

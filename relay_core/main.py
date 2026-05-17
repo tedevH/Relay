@@ -11,7 +11,7 @@ from relay_core.commands import (
     run_task, run_review, run_ai_review, run_summary,
     run_commit, run_push, run_scan, run_config,
     run_audit, run_init, run_context, run_digest,
-    run_auto_cmd, run_plan_cmd,
+    run_auto_cmd, run_go_cmd, run_last, run_plan_cmd,
 )
 
 
@@ -22,6 +22,7 @@ def _dispatch(command: str, value: str | None, repo: RepoState, **kwargs) -> int
     if command == "review":       return run_review(repo)
     if command == "ai-review":    return run_ai_review(repo)
     if command == "summary":      return run_summary(repo)
+    if command == "last":         return run_last(repo)
     if command == "commit":       return run_commit(repo)
     if command == "push":         return run_push(repo)
     if command == "history":      return _cmd_history(repo)
@@ -32,6 +33,7 @@ def _dispatch(command: str, value: str | None, repo: RepoState, **kwargs) -> int
     if command == "context":      return run_context(repo)
     if command == "digest":       return run_digest(repo)
     if command == "auto":         return _cmd_auto(value or "", repo, **kwargs)
+    if command == "go":           return _cmd_go(value or "", repo, **kwargs)
     if command == "plan":         return run_plan_cmd(value or "", repo)
     if command == "brain":        return _cmd_brain(value or "", repo, **kwargs)
     if command == "watch":
@@ -65,14 +67,14 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
     command = argv[0]
     alias_map = {
         "r": "review", "s": "summary", "c": "commit", "p": "push",
-        "h": "history", "help": "home",
+        "h": "history", "l": "last", "help": "home",
         "i": "interactive",
     }
     command = alias_map.get(command, command)
 
     parameterless = {
         "doctor", "status", "review", "ai-review", "summary", "history",
-        "commit", "push", "scan", "config", "home", "interactive",
+        "commit", "push", "scan", "config", "home", "interactive", "last",
         "init", "context", "digest", "triggers", "trigger-check",
     }
     if command in parameterless:
@@ -97,7 +99,7 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
             raise ValueError("'brain' requires a goal or subcommand")
         return "brain", task
 
-    if command == "auto":
+    if command in {"auto", "go"}:
         task = _task_without_flags(argv[1:], {
             "until", "max-retries", "max-cost", "mode",
             "agent-policy", "max-steps",
@@ -155,7 +157,7 @@ def run_interactive(repo: RepoState) -> int:
         try:
             args = stripped.split()
             first = args[0].lower()
-            known = set(ALL_COMMANDS) | {"@claude", "@codex", "r", "s", "c", "p", "h", "d", "i"}
+            known = set(ALL_COMMANDS) | {"@claude", "@codex", "r", "s", "c", "p", "h", "l", "d", "i"}
             if first not in known and not first.startswith("@"):
                 suggestion = fuzzy_match_command(first)
                 if suggestion:
@@ -208,6 +210,13 @@ def _cmd_auto(task_str: str, repo: RepoState, **kwargs) -> int:
                         max_retries=max_retries, max_cost=max_cost,
                         mode=mode, agent_policy=agent_policy,
                         auto_commit=auto_commit, max_steps=max_steps)
+
+
+def _cmd_go(task_str: str, repo: RepoState, **kwargs) -> int:
+    until = kwargs.get("until")
+    max_retries = int(kwargs.get("max_retries", 2))
+    max_cost = float(kwargs.get("max_cost", 1.00))
+    return run_go_cmd(task_str, repo, until=until, max_retries=max_retries, max_cost=max_cost)
 
 
 def _cmd_brain(value: str, repo: RepoState, **kwargs) -> int:
@@ -270,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Fuzzy match on unknown single-word first arg
     first_arg = args[0].lower()
-    known = set(ALL_COMMANDS) | {"@claude", "@codex", "r", "s", "c", "p", "h", "i", "help", "--version"}
+    known = set(ALL_COMMANDS) | {"@claude", "@codex", "r", "s", "c", "p", "h", "l", "i", "help", "--version"}
     if (first_arg not in known and not first_arg.startswith("@")
             and len(args) == 1 and " " not in first_arg):
         suggestion = fuzzy_match_command(first_arg)

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.4
+
+- Added `relay go` as the daily-driver verified automation command.
+- Added `relay last` and saved Relay Outcome cards.
+- Improved post-run UX with verification, changed files, risks, and next steps.
+
 ## v0.5.3
 
 - Restored the Windows AMD64 release binary while keeping Intel Mac disabled.

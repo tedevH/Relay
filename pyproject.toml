@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "relay-ai-brain"
-version = "0.5.3"
+version = "0.5.4"
 description = "Local-first automation brain for Claude Code, Codex CLI, and Git"
 readme = "README.md"
 requires-python = ">=3.10"

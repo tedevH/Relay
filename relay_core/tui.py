@@ -70,9 +70,9 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
 
     if is_first_time:
         steps = Text()
-        steps.append("Relay gives Claude Code memory across sessions.\n", style="dim")
+        steps.append("Relay gives Claude Code and Codex memory across sessions.\n", style="dim")
         steps.append("Every task you run gets logged. Every commit is tracked.\n", style="dim")
-        steps.append("Claude starts each session already knowing your project.\n\n", style="dim")
+        steps.append("Agents start each session already knowing your project.\n\n", style="dim")
 
         steps.append("Step 1  ", style="bold cyan")
         steps.append("cd into your project\n", style="white")
@@ -82,8 +82,8 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
         steps.append("   — sets up memory and git hooks\n", style="dim")
 
         steps.append("Step 3  ", style="bold cyan")
-        steps.append('relay "your task"', style="bold white")
-        steps.append("   — routes to Claude or Codex automatically\n", style="dim")
+        steps.append('relay go "your task"', style="bold white")
+        steps.append("   — runs, verifies, retries, and summarizes\n", style="dim")
 
         steps.append("Step 4  ", style="bold cyan")
         steps.append("relay review", style="bold white")
@@ -106,8 +106,11 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
     workflow = Text()
     workflow.append("Daily workflow\n\n", style="bold white")
 
-    workflow.append('relay "task"         ', style="bold cyan")
-    workflow.append("→ Claude or Codex runs with full project memory\n", style="dim")
+    workflow.append('relay go "task"      ', style="bold cyan")
+    workflow.append("→ run, verify, retry, auto-commit, summarize\n", style="dim")
+
+    workflow.append("relay last           ", style="bold cyan")
+    workflow.append("→ show the latest outcome card\n", style="dim")
 
     workflow.append("relay review         ", style="bold cyan")
     workflow.append("→ instant risk check (free, no tokens)\n", style="dim")
@@ -120,6 +123,9 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
 
     workflow.append("Power commands\n\n", style="bold white")
 
+    workflow.append('relay "task"                          ', style="bold cyan")
+    workflow.append("quick routed agent run\n", style="dim")
+
     workflow.append('relay auto "task" --until "condition"   ', style="bold cyan")
     workflow.append("autonomous loop\n", style="dim")
 
@@ -127,13 +133,13 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
     workflow.append("decompose + execute\n", style="dim")
 
     workflow.append("relay context                           ", style="bold cyan")
-    workflow.append("what Relay knows about this project\n", style="dim")
+    workflow.append("project memory map\n", style="dim")
 
     workflow.append("relay digest                            ", style="bold cyan")
     workflow.append("full project health report\n", style="dim")
 
     workflow.append("relay ai-review                         ", style="bold cyan")
-    workflow.append("deep AI code review\n", style="dim")
+    workflow.append("deep diff review\n", style="dim")
 
     workflow.append("relay doctor                            ", style="bold cyan")
     workflow.append("check dependencies", style="dim")
@@ -304,6 +310,56 @@ def show_result(agent: str, exit_code: int, files: list[str], prompt_type: str) 
 
     next_cmds = ["relay summary", "relay review"] if prompt_type != "review" else ["relay summary"]
     console.print(f"\n[dim]Next: {' · '.join(next_cmds)}[/dim]")
+
+
+def show_outcome(outcome: dict[str, Any]) -> None:
+    table = Table(box=None, show_header=False, padding=(0, 1))
+    table.add_column(style="dim white", width=18)
+    table.add_column()
+
+    success = outcome.get("success")
+    verified = outcome.get("verified")
+    files = outcome.get("files", [])
+    warnings = outcome.get("warnings", [])
+    commit_hash = outcome.get("commit_hash", "")
+
+    table.add_row("Task", outcome.get("task", ""))
+    if outcome.get("agent"):
+        table.add_row("Agent", outcome.get("agent", ""))
+    table.add_row("Status", Text("success", style="bold green") if success else Text("failed", style="bold red"))
+    if verified is not None:
+        table.add_row("Verified", Text("yes", style="bold green") if verified else Text("no", style="bold red"))
+    if outcome.get("branch"):
+        table.add_row("Branch", f"[dim]{outcome['branch']}[/dim]")
+    if commit_hash:
+        table.add_row("Commit", f"[dim]{commit_hash}[/dim]")
+    if outcome.get("diff_stat"):
+        table.add_row("Diff", outcome["diff_stat"])
+    if files:
+        for idx, file in enumerate(files[:8]):
+            risk = outcome.get("risk_levels", {}).get(file, "LOW")
+            color = RISK_COLORS.get(risk, "white")
+            table.add_row("Changed" if idx == 0 else "", Text(f"{file} [{risk}]", style=color))
+        if len(files) > 8:
+            table.add_row("", f"[dim]... and {len(files) - 8} more[/dim]")
+    else:
+        table.add_row("Changed", "[dim]none[/dim]")
+    if outcome.get("suggested_commit_message"):
+        table.add_row("Commit msg", outcome["suggested_commit_message"])
+
+    border = "red" if warnings or not success or verified is False else "green"
+    console.print()
+    console.print(Panel(table, title="[bold white]Relay Outcome[/bold white]", border_style=border, padding=(0, 1)))
+
+    if warnings:
+        warn_text = "\n".join(f"- {warning}" for warning in warnings)
+        console.print(Panel(warn_text, title="[bold yellow]Needs Attention[/bold yellow]", border_style="yellow"))
+
+    next_steps = outcome.get("next_steps", [])
+    if next_steps:
+        console.print("[bold white]Next[/bold white]")
+        for step in next_steps:
+            console.print(f"  [dim]•[/dim] {step}")
 
 
 def show_history(tasks: list[dict]) -> None:

@@ -1,37 +1,8 @@
 # Relay
 
-**Persistent memory and autonomous execution for Claude Code and Codex CLI.**
+**A local automation brain for Claude Code, Codex CLI, and Git.**
 
-AI coding agents forget everything when you close the terminal. Relay fixes that - and goes further, running tasks end-to-end without you watching.
-
-Every task you run gets logged. Every commit is tracked. Before every session, Relay injects what your agent needs to know - which files are active, what changed recently, what decisions were made - so it stops starting cold.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
-```
-
----
-
-## The problem
-
-You open Claude Code or Codex. It reads your entire codebase to understand the project - again. You explain the context - again. It makes the same mistakes it already made last week - because it doesn't remember last week.
-
-This happens on every session, every switch between agents, every time you close the terminal.
-
-## What Relay does
-
-Relay sits between you and your AI agents. It builds a memory of your project over time and feeds it back automatically before every session.
-
-- **Tracks every task and commit** - via a git post-commit hook that logs silently in the background
-- **Extracts symbols** - functions, routes, constants with exact file and line numbers
-- **Tracks workstreams** - groups related tasks into named feature threads
-- **Injects context before every session** - agents read `.relay/context.md` on startup and know your project without exploring it
-
-The result: your agent starts sessions already knowing what changed, what's risky, and what the active workstream is.
-
-Relay also runs fully autonomous loops - give it a goal, it plans, executes, verifies, diagnoses failures, and retries until done. No human involvement between steps.
-
----
+Relay gives your coding agents memory, chooses the right agent for the job, runs a verification loop, and shows you a clear outcome card so you know what changed and what to do next.
 
 ## Install
 
@@ -41,22 +12,65 @@ curl -fsSL https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
 
 Installs a standalone binary to `~/.local/bin/relay`. No Python install required.
 
-**Requirements:** [Claude Code](https://claude.ai/download) · [Codex CLI](https://github.com/openai/codex) · Git
+Requirements for live AI workflows:
 
----
+- [Claude Code](https://claude.ai/download)
+- [Codex CLI](https://github.com/openai/codex)
+- Git
 
-## Quick start
+Check your setup:
+
+```bash
+relay doctor
+```
+
+## Daily Use
+
+Use `relay go` when you want Relay to do more than route between Claude and Codex:
 
 ```bash
 cd your-project
-relay init          # set up memory and git hooks (one time)
-relay "your task"   # runs Claude with full project context
-relay review        # instant local risk check
-relay commit        # safe commit with confirmation
-relay push          # push with confirmation
+relay init
+relay go "fix failing tests"
+relay last
+relay push
 ```
 
----
+`relay go`:
+
+- infers a done condition
+- routes to Claude or Codex by task fit
+- creates a dedicated branch
+- runs the agent
+- verifies the result
+- diagnoses and retries when verification fails
+- can fall back to the other agent under the balanced policy
+- auto-commits verified success
+- prints and saves a Relay Outcome card
+
+`relay last` shows the latest outcome again:
+
+- task
+- agent
+- success and verification status
+- changed files and risk levels
+- diff stat
+- suggested commit message
+- next recommended commands
+
+## Why Use Relay Instead Of Switching Agents Yourself?
+
+Manual switching only chooses who starts the task. Relay handles the rest of the workflow:
+
+- persistent repo memory across sessions
+- automatic Claude/Codex routing with balanced tie-breaks
+- focused context injection before every agent run
+- verification and retry loops
+- local risk review and commit message suggestions
+- saved outcome cards you can inspect later
+- safe Git branch/commit/push flow
+
+The point is not just choosing Claude or Codex. The point is getting from task to verified Git outcome with less babysitting.
 
 ## Commands
 
@@ -64,12 +78,21 @@ relay push          # push with confirmation
 
 | Command | What it does |
 |---|---|
-| `relay "task"` | Routes to Claude or Codex, injects project context, runs |
-| `relay review` | Instant local risk check - files, contradictions, suggested commit message |
-| `relay ai-review` | Deep AI review of the current diff |
+| `relay go "task"` | Daily driver: route, run, verify, retry, commit, summarize |
+| `relay last` | Show the latest Relay Outcome card |
+| `relay review` | Instant local risk check |
 | `relay summary` | Diff summary with risk levels |
 | `relay commit` | Safe commit with smart message suggestion |
 | `relay push` | Safe push with confirmation |
+
+### Quick runs
+
+| Command | What it does |
+|---|---|
+| `relay "task"` | Quick routed agent run without the full verification loop |
+| `relay @claude "task"` | Force Claude |
+| `relay @codex "task"` | Force Codex |
+| `relay why "task"` | Explain routing without running |
 
 ### Memory and context
 
@@ -80,95 +103,102 @@ relay push          # push with confirmation
 | `relay digest` | Full project health report |
 | `relay history` | Recent task history |
 
-### Autonomous mode
+### Automation
 
 | Command | What it does |
 |---|---|
-| `relay auto "task" --until "condition"` | Execute → verify → diagnose → retry loop |
+| `relay auto "task" --until "condition"` | Custom execute -> verify -> diagnose -> retry loop |
 | `relay plan "goal"` | Decompose goal into subtasks and execute each |
+| `relay brain "goal"` | Multi-step automation brain with resume/log/rollback commands |
+
+Examples:
 
 ```bash
-# Examples
-relay auto "fix the failing auth test" --until "pytest passes"
-relay auto "add pagination to the API" --max-retries 3 --max-cost 1.00
+relay auto "fix the broken login flow" --until "npm test passes"
 relay plan "add user authentication with email and Google OAuth"
+relay brain "ship auth polish"
 ```
 
-### Overrides
+## How Memory Works
 
-```bash
-relay @claude "task"   # force Claude
-relay @codex "task"    # force Codex
-relay why "task"       # explain routing without running
-relay doctor           # check dependencies
-```
+Running `relay init` installs a git post-commit hook. After every commit, Relay silently:
 
----
+1. extracts new symbols from the diff
+2. classifies the active workstream
+3. updates `.relay/memory.json` with hot files and agent stats
 
-## How memory works
+Before every run, Relay writes `.relay/context.md` and updates `CLAUDE.md` with:
 
-Running `relay init` installs a git post-commit hook. After every commit - whether you used Claude, Codex, or typed it yourself - Relay silently:
+- the current task
+- relevant symbols with exact file locations
+- active workstream status
+- the files most likely to need editing
 
-1. Extracts new symbols from the diff (functions, routes, constants)
-2. Classifies the active workstream
-3. Updates `.relay/memory.json` with hot files and agent stats
+Both Claude Code and Codex can use this context instead of starting cold.
 
-Before every `relay "task"`, Relay writes `.relay/context.md` and `CLAUDE.md` with:
-- The current task
-- Relevant symbols with exact file locations
-- Active workstream and its status
-- The specific files most likely to need editing
+## Local Memory Structure
 
-Both Claude Code and Codex read this context on startup and go directly to the relevant files instead of exploring the codebase.
-
----
-
-## Local memory structure
-
-```
+```text
 .relay/
-  tasks.json        task history
-  memory.json       agent stats, hot files
-  symbols.json      tracked symbols with file locations
-  workstreams.json  active feature threads
-  context.md        injected before every session
-  last-diff.patch   last saved diff
-  config.json       routing and behavior config
+  tasks.json
+  memory.json
+  symbols.json
+  workstreams.json
+  context.md
+  last-diff.patch
+  last-outcome.json
+  config.json
+  brain.json
+  runs/
 ```
 
-Memory stays local and is never committed (added to `.git/info/exclude` automatically).
-
----
-
-## Autonomous loop
-
-`relay auto` closes the verification loop so tasks run end-to-end without human involvement between steps:
-
-```
-execute → verify (tests, build) → pass: commit → done
-                                → fail: diagnose → execute with guidance → loop
-```
-
-Budget cap and retry limit are required flags. Every run creates its own branch and is one-click revertable.
-
-```bash
-relay auto "fix the broken login flow" \
-  --until "npm test passes" \
-  --max-retries 3 \
-  --max-cost 1.00
-```
-
----
+Memory stays local and is never committed. Relay adds `.relay/` to `.git/info/exclude` automatically when possible.
 
 ## Safety
 
-- Never auto-commits without verification passing
-- Never auto-pushes unless `--mode pr` is explicitly set
+- No web app
+- No backend
+- No cloud sync
+- No API keys requested by Relay
+- Normal task, review, and summary commands do not auto-commit
+- `relay go` and `relay auto` auto-commit only after verification succeeds
+- Relay only auto-pushes in explicit `--mode pr`
 - `relay commit` and `relay push` always ask before running
-- No API keys, no cloud sync, no data sent anywhere
-- All data stays in `.relay/` inside your repo
 
----
+Relay warns when diffs touch risky areas like:
+
+- `.env`
+- lockfiles
+- migrations
+- auth files
+- Stripe/payment files
+- very large diffs
+
+## Publishing Releases
+
+Relay ships as standalone binaries through GitHub Releases.
+
+```bash
+git tag v0.5.4
+git push origin v0.5.4
+```
+
+The release workflow currently builds:
+
+```text
+relay-darwin-arm64
+relay-linux-amd64
+relay-windows-amd64.exe
+```
+
+## Source Install
+
+```bash
+git clone https://github.com/tedevH/Relay.git
+cd Relay
+python3 -m pip install -e .
+relay --version
+```
 
 ## License
 

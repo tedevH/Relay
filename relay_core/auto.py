@@ -29,6 +29,7 @@ from relay_core.memory import (
     append_repo_task, save_last_diff, update_project_knowledge,
 )
 from relay_core.routing import route_task
+from relay_core.outcome import build_outcome, save_outcome
 import relay_core.tui as tui
 
 
@@ -193,6 +194,7 @@ def run_auto(
 
             files = changed_files(repo)
             diff = current_diff(repo)
+            diff_stat = run_command(["git", "diff", "--stat"], cwd=repo.repo_root).stdout.strip() if repo.repo_root else ""
             save_last_diff(repo, diff)
             run.files_changed = files
 
@@ -237,6 +239,22 @@ def run_auto(
                 flush_costs(relay_dir)
                 _save_run(relay_dir, run_dir, run)
                 _show_auto_result(run)
+                outcome = build_outcome(
+                    repo,
+                    task=task,
+                    command_type="auto",
+                    agent=current_agent,
+                    exit_code=0,
+                    verified=True,
+                    verification=verification,
+                    branch=branch,
+                    commit_hash=commit_hash,
+                    run_id=run.id,
+                    files_override=files,
+                    diff_stat_override=diff_stat,
+                )
+                save_outcome(repo, outcome)
+                tui.show_outcome(outcome)
                 return 0
 
             if attempt_index >= max_retries:
