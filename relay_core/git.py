@@ -124,57 +124,50 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
         return result.returncode
 
     else:
-        # Codex: use exec mode so it auto-exits when the task is done.
-        # Resume previous session if available so it has prior context.
-        # exec mode = non-interactive, runs task and exits cleanly.
+        # Codex: resume previous session if available, then exec mode for auto-exit.
+        # ~/.codex/session_index.jsonl tracks every session — read it after
+        # Codex exits to get the new session ID without any output parsing.
         session_id = _load_codex_session(relay_dir)
 
         if session_id:
-            # Resume session context + exec mode for auto-exit
             command = [
                 "codex", "resume", session_id,
                 "--ask-for-approval", "never",
                 "exec", "--sandbox", "workspace-write", prompt,
             ]
         else:
-            # Fresh session in exec mode
             command = [
                 "codex",
                 "--ask-for-approval", "never",
                 "exec", "--sandbox", "workspace-write", prompt,
             ]
 
-        # Record output to capture new session ID for next run
-        import tempfile, platform
-        session_log = None
-        if platform.system() in ("Darwin", "Linux"):
-            try:
-                tf = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
-                session_log = tf.name
-                tf.close()
-                result = subprocess.run(["script", "-q", session_log] + command)
-            except Exception:
-                session_log = None
-                result = subprocess.run(command)
-        else:
-            result = subprocess.run(command)
+        result = subprocess.run(command)
 
-        # Save new session ID for next run
-        if session_log and relay_dir:
-            try:
-                with open(session_log, "rb") as f:
-                    content = f.read().decode("utf-8", errors="replace")
-                m = _re.search(r"codex resume ([a-f0-9-]{36})", content)
-                if m:
-                    _save_codex_session(relay_dir, m.group(1))
-            except Exception:
-                pass
-            try:
-                os.unlink(session_log)
-            except Exception:
-                pass
+        # Grab the latest session ID from Codex's own session index
+        new_id = _latest_codex_session_id()
+        if new_id and relay_dir:
+            _save_codex_session(relay_dir, new_id)
 
         return result.returncode
+
+
+def _latest_codex_session_id() -> str | None:
+    """Read the most recent session ID from Codex's own session index.
+    ~/.codex/session_index.jsonl is updated by Codex after every run.
+    """
+    import json as _j
+    index = Path.home() / ".codex" / "session_index.jsonl"
+    if not index.exists():
+        return None
+    try:
+        lines = [l for l in index.read_text(encoding="utf-8").splitlines() if l.strip()]
+        if not lines:
+            return None
+        last = _j.loads(lines[-1])
+        return last.get("id")
+    except Exception:
+        return None
 
 
 def _load_codex_session(relay_dir: Path | None) -> str | None:
