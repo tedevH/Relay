@@ -72,7 +72,7 @@ The installer downloads the correct standalone binary from the latest GitHub Rel
 If the repository or release is private, authenticate both the installer fetch and the release download:
 
 ```bash
-export GITHUB_TOKEN=ghp_your_token
+export GITHUB_TOKEN=YOUR_GITHUB_TOKEN
 curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
 ```
 
@@ -501,6 +501,10 @@ Relay stays local-first and safe around Git:
 - it only auto-pushes in explicit `--mode pr`
 - `relay commit` always asks before creating a commit
 - `relay push` always asks before pushing to GitHub
+
+## License
+
+Relay is open source under the MIT License. See [LICENSE](LICENSE).
 
 ## Future Monetization
 
