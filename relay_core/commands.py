@@ -149,7 +149,7 @@ def run_task(
     return 0
 
 
-def _write_context(repo: RepoState, task: str) -> None:
+def _write_context(repo: RepoState, task: str, tier: str = "feature") -> None:
     """Write compressed structured context to .relay/context.md and CLAUDE.md.
 
     Uses the intelligence layer to produce minimal, task-relevant state:
@@ -247,17 +247,35 @@ def _inject_context(repo: RepoState, task: str) -> None:
             lines.append(f"- {f}")
         lines.append("")
 
-    # Include key file contents so Claude doesn't need to read them first
-    if repo.repo_root:
-        key_files = ["relay_dashboard/templates/index.html",
-                     "relay_dashboard/server.py", "relay_core/main.py"]
-        for rel_path in key_files:
-            full = repo.repo_root / rel_path
-            if full.exists():
-                size = full.stat().st_size
-                if size < 80_000:  # skip very large files
-                    content = full.read_text(encoding="utf-8", errors="replace")
-                    lines += [f"## File: {rel_path}", "```", content[:6000], "```", ""]
+    # Phase 3 — tiered context: inject only what the task tier needs
+    if repo.repo_root and tier == "trivial":
+        # Trivial: find and include only the single most relevant file
+        relevant = _relevant_files_for_task(task, repo)
+        if relevant:
+            f = repo.repo_root / relevant[0]
+            if f.exists() and f.stat().st_size < 80_000:
+                content = f.read_text(encoding="utf-8", errors="replace")
+                lines += [f"## File: {relevant[0]}", "```", content[:4000], "```", ""]
+
+    elif repo.repo_root and tier == "architectural":
+        # Architectural: include workstreams, symbols, and multiple files
+        from relay_core.intelligence import load_workstreams, load_symbols
+        workstreams = load_workstreams(repo)
+        symbols = load_symbols(repo)
+        if workstreams:
+            lines += ["## All workstreams"]
+            for ws_name, ws in list(workstreams.items())[:5]:
+                lines.append(f"- {ws_name}: {ws.get('goal', '')[:60]}")
+            lines.append("")
+        if symbols:
+            lines += ["## All tracked symbols"]
+            for sym, loc in list(symbols.items())[:30]:
+                lines.append(f"- `{sym}` — {loc['file']}:{loc.get('line','?')} [{loc.get('type','?')}]")
+            lines.append("")
+
+    else:
+        # Feature (default): relevant workstream + symbols only (already injected above)
+        pass
 
     context_path = repo.relay_dir / "context.md"
     context_path.write_text("\n".join(lines), encoding="utf-8")
@@ -674,6 +692,24 @@ def run_config(repo: RepoState) -> int:
     config = load_config(repo)
     tui.show_config(config)
     return 0
+
+
+def run_auto_cmd(
+    task: str,
+    repo: RepoState,
+    until: str | None = None,
+    max_retries: int = 3,
+    max_cost: float = 1.00,
+    forced_agent: str | None = None,
+) -> int:
+    from relay_core.auto import run_auto
+    return run_auto(task, repo, until=until, max_retries=max_retries,
+                    max_cost=max_cost, forced_agent=forced_agent)
+
+
+def run_plan_cmd(goal: str, repo: RepoState, dry_run: bool = False) -> int:
+    from relay_core.planner import run_plan
+    return run_plan(goal, repo, dry_run=dry_run)
 
 
 def run_dashboard(repo: RepoState) -> int:

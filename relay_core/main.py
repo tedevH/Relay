@@ -11,6 +11,7 @@ from relay_core.commands import (
     run_task, run_review, run_ai_review, run_summary,
     run_commit, run_push, run_scan, run_config,
     run_dashboard, run_audit, run_init, run_context, run_digest,
+    run_auto_cmd, run_plan_cmd,
 )
 
 
@@ -31,6 +32,8 @@ def _dispatch(command: str, value: str | None, repo: RepoState, **kwargs) -> int
     if command == "init":         return run_init(repo)
     if command == "context":      return run_context(repo)
     if command == "digest":       return run_digest(repo)
+    if command == "auto":         return _cmd_auto(value or "", repo, **kwargs)
+    if command == "plan":         return run_plan_cmd(value or "", repo)
     if command == "chain":
         from relay_core.chain import run_chain
         return run_chain(value or "", repo)
@@ -63,8 +66,8 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
     if command == "audit":
         return "audit", "--ci" if "--ci" in argv[1:] else ""
 
-    if command in {"why", "continue", "chain"}:
-        task = " ".join(argv[1:]).strip()
+    if command in {"why", "continue", "chain", "auto", "plan"}:
+        task = " ".join(a for a in argv[1:] if not a.startswith("--")).strip()
         if not task:
             raise ValueError(f"'{command}' requires a task argument")
         return command, task
@@ -142,6 +145,16 @@ def _cmd_why(task: str, repo: RepoState) -> int:
     return 0
 
 
+def _cmd_auto(task_str: str, repo: RepoState, **kwargs) -> int:
+    """Parse --until, --max-retries, --max-cost from kwargs then run auto."""
+    import re
+    until = kwargs.get("until")
+    max_retries = int(kwargs.get("max_retries", 3))
+    max_cost = float(kwargs.get("max_cost", 1.00))
+    return run_auto_cmd(task_str, repo, until=until,
+                        max_retries=max_retries, max_cost=max_cost)
+
+
 def _cmd_history(repo: RepoState) -> int:
     if not repo.in_git_repo:
         tui.show_info("Not inside a git repo — no history available.")
@@ -203,8 +216,22 @@ def main(argv: list[str] | None = None) -> int:
 
     diagnose_on_fail = "--diagnose-on-fail" in args
 
+    # Parse auto-loop flags
+    def _flag(name: str, default: str) -> str:
+        for a in args:
+            if a.startswith(f"--{name}="):
+                return a.split("=", 1)[1]
+        return default
+
+    dispatch_kwargs: dict = {
+        "diagnose_on_fail": diagnose_on_fail,
+        "until": _flag("until", "") or None,
+        "max_retries": int(_flag("max-retries", "3")),
+        "max_cost": float(_flag("max-cost", "1.00")),
+    }
+
     try:
-        return _dispatch(command, value, repo, diagnose_on_fail=diagnose_on_fail)
+        return _dispatch(command, value, repo, **dispatch_kwargs)
     except RelayError as exc:
         tui.show_error(str(exc))
         missing = missing_required_dependencies()

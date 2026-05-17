@@ -95,4 +95,5 @@ ALL_COMMANDS = [
     "review", "ai-review", "summary", "commit", "push", "doctor", "status",
     "history", "why", "continue", "chain", "dashboard", "audit",
     "config", "scan", "interactive", "init", "context", "digest",
+    "auto", "plan",
 ]

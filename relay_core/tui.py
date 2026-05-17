@@ -48,6 +48,8 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
     cmd_table.add_column(style="dim white")
     commands = [
         ('relay "task"', "route to Claude or Codex — full native terminal handoff"),
+        ("relay auto \"task\" --until \"condition\"", "autonomous loop — execute, verify, diagnose, retry"),
+        ("relay plan \"goal\"", "decompose goal into subtasks and execute each"),
         ("relay init", "set up git hooks + memory for this repo"),
         ("relay context", "show what Relay knows about this project"),
         ("relay digest", "full project health report"),

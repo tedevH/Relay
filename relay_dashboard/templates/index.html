@@ -73,7 +73,38 @@
   .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(0,212,170,0.06); }
   .nav-section { padding: 16px 20px 6px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
   .sidebar-footer { margin-top: auto; padding: 16px 20px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); }
-  .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--success); margin-right: 6px; }
+  .status-line { display: flex; align-items: center; gap: 6px; }
+  .status-dot {
+    position: relative;
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    flex-shrink: 0;
+  }
+  .status-dot::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    background: rgba(34, 197, 94, 0.35);
+    animation: status-pulse 1.8s ease-out infinite;
+  }
+  @keyframes status-pulse {
+    0% {
+      transform: scale(0.75);
+      opacity: 0.85;
+    }
+    70% {
+      transform: scale(1.9);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(1.9);
+      opacity: 0;
+    }
+  }
 
   /* Tabs/pages */
   .page { display: none; }
@@ -86,11 +117,53 @@
 
   /* Cards */
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
+  .card {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface);
+    background-image: linear-gradient(135deg, rgba(255,255,255,0.025) 0%, transparent 55%);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 50%);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(0,0,0,0.32); border-color: rgba(255,255,255,0.1); }
+  .card:hover::before { opacity: 1; }
+
   .card-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
   .card-value { font-size: 28px; font-weight: 700; color: var(--text); }
   .card-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  .card.accent {
+    background-image: linear-gradient(135deg, rgba(0,212,170,0.10) 0%, transparent 55%);
+    border-color: rgba(0,212,170,0.22);
+    box-shadow: 0 0 16px rgba(0,212,170,0.06);
+  }
+  .card.accent::before { background: linear-gradient(135deg, rgba(0,212,170,0.12) 0%, transparent 55%); }
+  .card.accent:hover {
+    border-color: rgba(0,212,170,0.42);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.32), 0 0 24px rgba(0,212,170,0.18);
+  }
   .card.accent .card-value { color: var(--accent); }
+
+  .card.blue {
+    background-image: linear-gradient(135deg, rgba(79,158,248,0.09) 0%, transparent 55%);
+    border-color: rgba(79,158,248,0.2);
+  }
+  .card.blue::before { background: linear-gradient(135deg, rgba(79,158,248,0.1) 0%, transparent 55%); }
+  .card.blue:hover {
+    border-color: rgba(79,158,248,0.38);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.32), 0 0 20px rgba(79,158,248,0.12);
+  }
   .card.blue .card-value { color: var(--accent2); }
 
   /* Grids */
@@ -226,10 +299,11 @@
     <span class="nav-item" onclick="showPage('diff', this)">Diff Viewer</span>
     <span class="nav-item" onclick="showPage('memory', this)">Memory</span>
     <span class="nav-item" onclick="showPage('terminal', this)">Terminal</span>
+    <span class="nav-item" onclick="showPage('runs', this)">Auto Runs</span>
     <div class="nav-section">Config</div>
     <span class="nav-item" onclick="showPage('settings', this)">Settings</span>
     <div class="sidebar-footer">
-      <div><span class="status-dot"></span>Live · auto-refresh 30s</div>
+      <div class="status-line"><span class="status-dot"></span><span>Live · auto-refresh 30s</span><span id="relay-version" style="opacity:.6;"></span></div>
       <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">&#9788; Light mode</button>
     </div>
   </nav>
@@ -346,6 +420,37 @@
       </div>
     </div>
 
+    <!-- Auto Runs -->
+    <div id="page-runs" class="page">
+      <div class="page-header">
+        <div class="page-title">Auto Runs</div>
+        <div class="page-sub">Autonomous task history — each run is a branch, one-click revertable</div>
+      </div>
+
+      <!-- Cost summary -->
+      <div class="cards" id="runs-cost-cards" style="margin-bottom:16px">
+        <div class="card"><div class="card-label">Total Runs</div><div class="card-value" id="runs-total">—</div></div>
+        <div class="card accent"><div class="card-label">Succeeded</div><div class="card-value" id="runs-success">—</div></div>
+        <div class="card"><div class="card-label">Escalated</div><div class="card-value" id="runs-escalated">—</div></div>
+        <div class="card blue"><div class="card-label">Total Cost</div><div class="card-value" id="runs-cost">—</div></div>
+      </div>
+
+      <!-- Runs table -->
+      <div class="table-wrap">
+        <div class="table-header"><span class="table-title">Run History</span></div>
+        <table>
+          <thead><tr><th>Time</th><th>Task</th><th>Status</th><th>Retries</th><th>Cost</th><th>Branch</th><th>Action</th></tr></thead>
+          <tbody id="runs-table"></tbody>
+        </table>
+      </div>
+
+      <!-- Per-job cost breakdown -->
+      <div class="panel" id="cost-breakdown-panel">
+        <div class="panel-title">Cost breakdown by job type</div>
+        <div id="cost-breakdown"></div>
+      </div>
+    </div>
+
     <!-- Terminal -->
     <div id="page-terminal" class="page">
       <div class="page-header">
@@ -426,6 +531,7 @@ function showPage(id, el) {
   if (id === 'memory') loadMemory();
   if (id === 'settings') loadSettings();
   if (id === 'history') renderHistory();
+  if (id === 'runs') loadRuns();
 }
 
 // ── State ──
@@ -851,10 +957,103 @@ document.addEventListener('DOMContentLoaded', () => {
   if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') runFromInput(); });
 });
 
+// ── Auto Runs ──
+async function loadRuns() {
+  try {
+    const [runsRes, costsRes] = await Promise.all([
+      fetch('/api/runs'), fetch('/api/costs')
+    ]);
+    const runs = await runsRes.json();
+    const costs = await costsRes.json();
+    renderRuns(runs, costs);
+  } catch(e) {}
+}
+
+function renderRuns(runs, costs) {
+  const total = runs.length;
+  const succeeded = runs.filter(r => r.status === 'success').length;
+  const escalated = runs.filter(r => r.status === 'escalated' || r.status === 'failed').length;
+  const totalCost = runs.reduce((s, r) => s + (r.cost_usd || 0), 0);
+
+  document.getElementById('runs-total').textContent = total;
+  document.getElementById('runs-success').textContent = succeeded;
+  document.getElementById('runs-escalated').textContent = escalated;
+  document.getElementById('runs-cost').textContent = `$${totalCost.toFixed(3)}`;
+
+  const tbody = document.getElementById('runs-table');
+  if (!runs.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">No auto runs yet. Try: relay auto "task" --until "condition"</td></tr>';
+  } else {
+    tbody.innerHTML = [...runs].reverse().map(r => {
+      const statusColor = r.status === 'success' ? 'var(--success)' : r.status === 'running' ? 'var(--accent)' : 'var(--error)';
+      const ts = (r.started_at || '').slice(0,16).replace('T',' ');
+      const cost = `$${(r.cost_usd || 0).toFixed(3)}`;
+      const branch = r.branch || '';
+      const shortBranch = branch.split('/').slice(-1)[0] || branch;
+      const retries = `${r.retries_used || 0}/${r.max_retries || 0}`;
+      const rollbackBtn = r.status === 'success'
+        ? `<button class="term-btn" onclick="rollback('${esc(branch)}')" style="font-size:10px;padding:3px 8px">↩ Rollback</button>`
+        : '';
+      return `<tr>
+        <td>${ts}</td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((r.task||'').slice(0,70))}</td>
+        <td><span style="color:${statusColor};font-weight:600">${r.status}</span></td>
+        <td>${retries}</td>
+        <td>${cost}</td>
+        <td style="font-size:10px;color:var(--muted)">${esc(shortBranch)}</td>
+        <td>${rollbackBtn}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Cost breakdown from costs.json
+  if (costs.length) {
+    const last = costs[costs.length - 1];
+    const byJob = last.by_job || {};
+    const el = document.getElementById('cost-breakdown');
+    el.innerHTML = Object.entries(byJob).map(([job, cost]) =>
+      `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--muted)">${job}</span>
+        <span>$${cost.toFixed(5)}</span>
+      </div>`
+    ).join('') || '<span style="color:var(--muted)">No cost data yet.</span>';
+  }
+}
+
+async function rollback(branch) {
+  if (!confirm(`Rollback branch ${branch}? This will revert the last commit.`)) return;
+  try {
+    const r = await fetch('/api/rollback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({branch}),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      alert('Rollback complete.');
+      loadRuns();
+    } else {
+      alert('Rollback failed: ' + (data.error || 'unknown error'));
+    }
+  } catch(e) {
+    alert('Rollback request failed.');
+  }
+}
+
 // ── Init & auto-refresh ──
 applyTheme(localStorage.getItem('relay-theme') || 'dark');
 loadTasks();
 setInterval(loadTasks, 30000);
+
+async function loadVersion() {
+  try {
+    const r = await fetch('/api/version');
+    const d = await r.json();
+    const el = document.getElementById('relay-version');
+    if (el && d.version) el.textContent = `v${d.version}`;
+  } catch {}
+}
+loadVersion();
 </script>
 </body>
 </html>

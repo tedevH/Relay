@@ -12,6 +12,8 @@ from relay_core.types import RepoState
 from relay_core.diff import smart_commit_message
 import relay_core.tui as tui
 
+VERSION = "0.1.0"
+
 # Relay subcommands allowed to run from the dashboard terminal
 ALLOWED_COMMANDS = {
     "review", "ai-review", "summary", "doctor", "status",
@@ -83,6 +85,10 @@ def start_dashboard(repo: RepoState) -> int:
     def api_project():
         return jsonify(_load_json(relay_dir / "project.json", {}))
 
+    @app.route("/api/version")
+    def api_version():
+        return jsonify({"version": VERSION})
+
     @app.route("/api/diff")
     def api_diff():
         diff_path = relay_dir / "last-diff.patch"
@@ -104,6 +110,34 @@ def start_dashboard(repo: RepoState) -> int:
     @app.route("/api/config")
     def api_config():
         return jsonify(_load_json(relay_dir / "config.json", {}))
+
+    @app.route("/api/runs")
+    def api_runs():
+        return jsonify(_load_json(relay_dir / "auto-runs.json", []))
+
+    @app.route("/api/costs")
+    def api_costs():
+        return jsonify(_load_json(relay_dir / "costs.json", []))
+
+    @app.route("/api/rollback", methods=["POST"])
+    def api_rollback():
+        """Rollback by reverting the last commit on the current branch."""
+        try:
+            data = request.json or {}
+            branch = data.get("branch", "")
+            result = subprocess.run(
+                ["git", "revert", "--no-commit", "HEAD"],
+                cwd=str(repo_root), capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                return jsonify({"ok": False, "error": result.stderr.strip()})
+            subprocess.run(
+                ["git", "commit", "-m", "relay: rollback auto run"],
+                cwd=str(repo_root), capture_output=True, text=True,
+            )
+            return jsonify({"ok": True})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)})
 
     # ── Terminal endpoint — SSE streaming ─────────────────────────
 
@@ -167,7 +201,7 @@ def start_dashboard(repo: RepoState) -> int:
     # ─────────────────────────────────────────────────────────────
 
     tui.console.print()
-    tui.console.print(f"[bold cyan]⚡ Relay Dashboard[/bold cyan]  [dim]http://localhost:{port}[/dim]")
+    tui.console.print(f"[bold cyan]⚡ Relay Dashboard[/bold cyan]  v{VERSION}  [dim]http://localhost:{port}[/dim]")
     tui.console.print("[dim]Ctrl+C to stop[/dim]")
     tui.console.print()
 
