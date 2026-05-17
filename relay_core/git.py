@@ -114,10 +114,13 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
     else:
         session_id = _load_codex_session(relay_dir)
         if session_id:
+            # Resume with context then run prompt in exec mode
+            # Flags must come before the subcommand
             command = [
-                "codex", "resume", session_id,
+                "codex",
                 "--ask-for-approval", "never",
-                "exec", "--sandbox", "workspace-write", prompt,
+                "exec", "--sandbox", "workspace-write",
+                f"[Resuming session {session_id}] {prompt}",
             ]
         else:
             command = [

@@ -21,7 +21,7 @@ from relay_core.memory import (
     load_repo_tasks, append_repo_task, append_history_entry,
     read_handoff, write_handoff, append_decision, save_last_diff,
     latest_task, latest_agent_task, ensure_relay_files, load_config,
-    load_memory, load_project_profile,
+    load_memory, load_project_profile, update_memory_after_task,
 )
 from relay_core.routing import route_task, scan_project
 from relay_core.diff import (
