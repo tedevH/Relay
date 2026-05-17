@@ -78,10 +78,48 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     cwd = repo.repo_root or repo.cwd
     tui.show_handoff_note(agent, task)
 
-    # Run agent with session continuity — Claude uses --continue,
-    # Codex uses saved session ID via 'codex resume'
+    # Run agent — non-interactive with live elapsed counter.
+    # Developer watches the timer, not a blank terminal.
+    # Output shown in a clean panel when done.
     from relay_core.git import run_agent
-    run_agent(agent, task, cwd, relay_dir=repo.relay_dir)
+    exit_code, output = run_agent(agent, task, cwd, relay_dir=repo.relay_dir)
+
+    # Show result
+    files = changed_files(repo)
+    diff_text = current_diff(repo)
+    diff_stat = diff_summary(repo)
+    warnings = warning_paths(files)
+    if len(files) > 20:
+        warnings.append("more than 20 files changed")
+    save_last_diff(repo, diff_text)
+
+    # Show clean output panel
+    if output.strip():
+        tui.show_review_output(agent, output, exit_code)
+
+    if warnings:
+        tui.show_warnings(warnings)
+
+    tui.show_result(agent, exit_code, files, prompt_type)
+
+    # Update memory
+    from relay_core.memory import append_repo_task
+    from relay_core.utils import timestamp_now, detect_rate_limit
+    rate_limited = detect_rate_limit(output)
+    append_repo_task(repo, {
+        "command_type": "task",
+        "timestamp": timestamp_now(),
+        "original_task": task,
+        "selected_agent": agent,
+        "exit_code": exit_code,
+        "success": exit_code == 0,
+        "rate_limit_detected": rate_limited,
+        "changed_files": files,
+        "workstream": "",
+    })
+    update_memory_after_task(repo, agent, files, exit_code == 0)
+
+    return exit_code
 
     # Never reached — exec_agent replaces this process
     return 0

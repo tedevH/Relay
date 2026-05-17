@@ -88,47 +88,31 @@ def has_uncommitted_changes(repo: RepoState) -> bool:
     return bool(git_status_lines(repo))
 
 
-def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None) -> int:
-    """Run Claude or Codex with full native terminal, then return to Relay.
+def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None) -> tuple[int, str]:
+    """Run Claude or Codex non-interactively with a live elapsed-time counter.
 
-    Uses subprocess.run (not execvp) so Relay gets control back after the
-    agent exits — allowing session ID capture and post-run bookkeeping.
+    The developer doesn't need to watch or interact with the terminal.
+    A counter shows the AI is working. Output is shown in a clean panel when done.
 
-    Claude: uses --continue to automatically resume the last session in this
-            directory. No session ID tracking needed.
-    Codex:  saves the session ID printed on exit and uses 'codex resume <id>'
-            on the next run for full context continuity.
-
-    Task is copied to clipboard — user presses Cmd+V to paste.
+    Claude: claude --permission-mode acceptEdits --continue -p "task"
+            --continue resumes previous session for full context continuity.
+    Codex:  codex resume <id> exec "task" — resumes session, auto-exits.
     """
-    import re as _re
-
-    # Copy task to clipboard
-    try:
-        subprocess.run(["pbcopy"], input=prompt.encode(), check=False)
-    except FileNotFoundError:
-        try:
-            subprocess.run(["xclip", "-selection", "clipboard"],
-                           input=prompt.encode(), check=False)
-        except FileNotFoundError:
-            pass
+    import threading
+    import time
+    from rich.live import Live
+    from rich.text import Text
+    from relay_core.tui import console
 
     os.chdir(str(cwd))
 
     if agent == "claude":
-        # --continue resumes the most recent Claude session in this directory
-        # automatically — no session ID needed, full context preserved
-        result = subprocess.run(
-            ["claude", "--permission-mode", "acceptEdits", "--continue"],
-        )
-        return result.returncode
-
+        command = [
+            "claude", "--permission-mode", "acceptEdits",
+            "--continue", "-p", prompt,
+        ]
     else:
-        # Codex: resume previous session if available, then exec mode for auto-exit.
-        # ~/.codex/session_index.jsonl tracks every session — read it after
-        # Codex exits to get the new session ID without any output parsing.
         session_id = _load_codex_session(relay_dir)
-
         if session_id:
             command = [
                 "codex", "resume", session_id,
@@ -142,14 +126,55 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
                 "exec", "--sandbox", "workspace-write", prompt,
             ]
 
-        result = subprocess.run(command)
+    agent_name = "Claude" if agent == "claude" else "Codex"
 
-        # Grab the latest session ID from Codex's own session index
+    process = subprocess.Popen(
+        command,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    output_lines: list[str] = []
+    done_event = threading.Event()
+
+    def _reader() -> None:
+        assert process.stdout is not None
+        for line in process.stdout:
+            output_lines.append(line)
+        done_event.set()
+
+    threading.Thread(target=_reader, daemon=True).start()
+
+    start = time.time()
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    frame_idx = 0
+
+    with Live(console=console, refresh_per_second=10) as live:
+        while not done_event.is_set():
+            elapsed = int(time.time() - start)
+            mins, secs = divmod(elapsed, 60)
+            timer = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
+            frame = frames[frame_idx % len(frames)]
+            frame_idx += 1
+            live.update(Text(
+                f"  {frame} {agent_name} is working... {timer}",
+                style="bold cyan" if agent == "claude" else "bold blue",
+            ))
+            time.sleep(0.1)
+        live.update(Text(""))
+
+    process.wait()
+
+    # Save Codex session ID for next run
+    if agent == "codex":
         new_id = _latest_codex_session_id()
         if new_id and relay_dir:
             _save_codex_session(relay_dir, new_id)
 
-        return result.returncode
+    return process.returncode, "".join(output_lines)
 
 
 def _latest_codex_session_id() -> str | None:
