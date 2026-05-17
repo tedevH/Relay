@@ -14,7 +14,7 @@ from relay_core.commands import (
 )
 
 
-def _dispatch(command: str, value: str | None, repo: RepoState) -> int:
+def _dispatch(command: str, value: str | None, repo: RepoState, **kwargs) -> int:
     if command == "doctor":       return _cmd_doctor(repo)
     if command == "status":       return _cmd_status(repo)
     if command == "why":          return _cmd_why(value or "", repo)
@@ -34,9 +34,10 @@ def _dispatch(command: str, value: str | None, repo: RepoState) -> int:
     if command == "chain":
         from relay_core.chain import run_chain
         return run_chain(value or "", repo)
-    if command == "@claude":      return run_task(value or "", repo, forced_agent="claude")
-    if command == "@codex":       return run_task(value or "", repo, forced_agent="codex")
-    return run_task(value or "", repo)
+    diagnose = kwargs.get("diagnose_on_fail", False)
+    if command == "@claude":      return run_task(value or "", repo, forced_agent="claude", diagnose_on_fail=diagnose)
+    if command == "@codex":       return run_task(value or "", repo, forced_agent="codex", diagnose_on_fail=diagnose)
+    return run_task(value or "", repo, diagnose_on_fail=diagnose)
 
 
 def parse_args(argv: list[str]) -> tuple[str, str | None]:
@@ -74,6 +75,8 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
             raise ValueError(f"'{command}' requires a task argument")
         return command, task
 
+    # Strip --diagnose-on-fail flag from task args
+    argv = [a for a in argv if a != "--diagnose-on-fail"]
     task = " ".join(argv).strip()
     if not task:
         raise ValueError("missing task")
@@ -198,8 +201,10 @@ def main(argv: list[str] | None = None) -> int:
     if command in {"home", "interactive"}:
         return run_interactive(repo)
 
+    diagnose_on_fail = "--diagnose-on-fail" in args
+
     try:
-        return _dispatch(command, value, repo)
+        return _dispatch(command, value, repo, diagnose_on_fail=diagnose_on_fail)
     except RelayError as exc:
         tui.show_error(str(exc))
         missing = missing_required_dependencies()

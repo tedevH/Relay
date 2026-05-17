@@ -46,7 +46,12 @@ def warning_paths(files: list[str]) -> list[str]:
 
 # ── Task runner ───────────────────────────────────────────────────────────────
 
-def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int:
+def run_task(
+    task: str,
+    repo: RepoState,
+    forced_agent: str | None = None,
+    diagnose_on_fail: bool = False,
+) -> int:
     """Route the task, show routing decision, inject context, then hand off
     completely to Claude or Codex via os.execvp. Relay is gone after this.
     The git post-commit hook handles logging when the user commits.
@@ -89,6 +94,10 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
         from relay_core.utils import normalize_agent_name
         tui.show_info(f"↩  Resumed previous {normalize_agent_name(agent)} session — full prior context available")
 
+    # Phase 0 — clean the output
+    from relay_core.cleaner import save_output
+    clean = save_output(repo.relay_dir or Path(".relay"), agent, output)
+
     # Show result
     files = changed_files(repo)
     diff_text = current_diff(repo)
@@ -99,8 +108,18 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     save_last_diff(repo, diff_text)
 
     # Show clean output panel
-    if output.strip():
-        tui.show_review_output(agent, output, exit_code)
+    if clean.strip():
+        tui.show_review_output(agent, clean, exit_code)
+
+    # Phase 2.5 — diagnose on fail
+    if diagnose_on_fail and exit_code != 0 and repo.repo_root:
+        _run_diagnose(
+            task=task,
+            agent=agent,
+            files=files,
+            output=clean,
+            repo=repo,
+        )
 
     if warnings:
         tui.show_warnings(warnings)
@@ -323,6 +342,76 @@ def _update_claude_md(repo: RepoState, task: str = "") -> None:
 
 
 # ── Review commands ───────────────────────────────────────────────────────────
+
+def _run_diagnose(
+    task: str,
+    agent: str,
+    files: list[str],
+    output: str,
+    repo: RepoState,
+) -> None:
+    """Phase 2.5 — run one diagnose call after a failed task and show guidance."""
+    from relay_core.diagnose import diagnose_failure, verify_task, infer_done_condition
+    from relay_core.models import infer_done_condition as haiku_condition
+    from relay_core.git import current_diff
+
+    tui.console.print()
+    tui.show_info("Running failure diagnosis...")
+
+    diff = current_diff(repo)
+
+    # Infer done-condition via Haiku if not provided
+    done_condition = haiku_condition(task, relay_dir=repo.relay_dir)
+
+    # Cheap verification first
+    verify = verify_task(repo.repo_root or repo.cwd, done_condition, files)
+
+    diagnosis = diagnose_failure(
+        task=task,
+        done_condition=done_condition,
+        diff=diff[:4000],
+        error=output[-2000:] if output else "No error output captured.",
+        relay_dir=repo.relay_dir,
+    )
+
+    # Display diagnosis
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich import box
+    from relay_core.tui import console
+
+    conf = diagnosis.get("confidence", 0)
+    conf_color = "bold green" if conf >= 0.7 else "bold yellow" if conf >= 0.4 else "bold red"
+    should_retry = diagnosis.get("should_retry", False)
+
+    content = Text()
+    content.append("Root cause  ", style="dim white")
+    content.append(diagnosis.get("root_cause", "unknown") + "\n", style="white")
+    content.append("Category    ", style="dim white")
+    content.append(diagnosis.get("category", "unknown") + "\n", style="bold white")
+    content.append("Confidence  ", style="dim white")
+    content.append(f"{conf:.0%}\n", style=conf_color)
+    content.append("\nGuidance\n", style="dim white")
+    content.append(diagnosis.get("guidance", ""), style="bold white")
+
+    if not should_retry:
+        content.append("\n\nEscalate    ", style="dim white")
+        content.append(diagnosis.get("escalate_reason", ""), style="bold yellow")
+
+    border = "green" if should_retry else "red"
+    console.print(Panel(
+        content,
+        title=f"[bold white]{'↻ Retry recommended' if should_retry else '⚑ Escalate — do not retry'}[/bold white]",
+        border_style=border,
+        padding=(1, 2),
+    ))
+
+    if should_retry:
+        tui.show_info(
+            f"Re-run with this guidance: "
+            f"relay @{agent} \"{task}\" --diagnose-on-fail"
+        )
+
 
 def run_review(repo: RepoState) -> int:
     """Instant local review — no AI, no tokens."""
