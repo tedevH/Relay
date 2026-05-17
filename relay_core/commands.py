@@ -100,7 +100,7 @@ def run_task(task: str, repo: RepoState, forced_agent: str | None = None) -> int
     if warnings:
         tui.show_warnings(warnings)
 
-    tui.show_result(agent, exit_code, files, prompt_type)
+    tui.show_result(agent, exit_code, files, "normal")
 
     # Update memory
     from relay_core.memory import append_repo_task
