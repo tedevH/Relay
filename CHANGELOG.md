@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.1
+
+- Removed the local dashboard surface.
+- Removed Flask from runtime/package dependencies.
+- Added checksum verification for standalone binary installs.
+
 ## v0.5.0
 
 - Added multi-step `relay brain` automation.

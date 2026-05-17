@@ -98,8 +98,8 @@ Relay ships as standalone binaries through GitHub Releases.
 To publish a release:
 
 ```bash
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.1
+git push origin v0.5.1
 ```
 
 The GitHub Actions release workflow builds:
