@@ -29,6 +29,7 @@ Relay only shells out to software you already have installed locally.
 - Lets you review changes with the opposite agent
 - Summarizes the current diff locally
 - Runs an automation brain loop with `relay auto`: route, execute, verify, diagnose, retry/fallback, checkpoint
+- Runs multi-step goals with `relay brain`: plan, execute each step, resume, inspect logs, stop, or roll back
 - Lets you commit and push only after explicit confirmation
 
 ## Requirements
@@ -249,6 +250,7 @@ Runs the automation brain:
 - creates a dedicated `relay/auto/...` branch
 - executes the selected agent
 - runs local verification adapters such as `npm test`, `npm run build`, `pytest`, `go test`, or `cargo test`
+- checks richer done conditions such as created files, localhost endpoints, and added tests when those are named
 - diagnoses failures and retries with focused guidance
 - can fall back to the other agent under the balanced policy
 - saves durable state in `.relay/brain.json` and `.relay/runs/<run-id>/`
@@ -267,13 +269,50 @@ Automation modes:
 - `safe`: no agent execution
 - `edit`: edits are allowed and verified success can auto-commit
 - `commit`: same commit behavior, explicit about commit-capable automation
-- `pr`: reserved for push/PR-capable workflows
+- `pr`: commit, push the automation branch, and open a PR when GitHub CLI `gh` is available
 
 Agent policies:
 
 - `balanced`: route the first attempt, then alternate on retries when useful
 - `route`: keep the routed agent for all retries
 - `alternate`: start with the less-used agent from local Relay memory
+
+### `relay brain "goal"`
+
+Runs a multi-step automation brain over a larger goal.
+
+Flow:
+
+```text
+goal -> plan -> step auto-runs -> verify each step -> checkpoint -> final status
+```
+
+Useful commands:
+
+```bash
+relay brain "ship auth polish"
+relay brain status
+relay brain resume
+relay brain logs
+relay brain stop
+relay brain rollback
+```
+
+`brain rollback` creates a normal Git revert commit for the latest Relay auto-created commit it can find.
+
+### Local Triggers
+
+Relay can persist local automation triggers without needing a hosted backend:
+
+```bash
+relay watch "if tests fail, diagnose and fix"
+relay every "1h" "summarize repo health"
+relay on "ci-fail" "repair failing GitHub Actions"
+relay triggers
+relay trigger-check
+```
+
+Triggers are saved in `.relay/triggers.json`. Wire `relay trigger-check` into cron, launchd, or CI to evaluate them from your own machine or runner.
 
 ### `relay commit`
 
@@ -379,10 +418,10 @@ Relay will not:
 
 - ask for API keys
 - hide auto-commits from you
-- auto-push
+- auto-push except when `relay auto --mode pr` is explicitly selected
 - modify `.env` files by itself
 
-`relay auto` may create a local commit after verification succeeds. This is controlled by `auto_commit_on_success` in `.relay/config.json` and can be disabled per run with `--no-auto-commit`.
+`relay auto` may create a local commit after verification succeeds. This is controlled by `auto_commit_on_success` in `.relay/config.json` and can be disabled per run with `--no-auto-commit`. `--mode pr` may also push the automation branch and open a PR.
 
 Relay warns when diffs touch risky areas like:
 
@@ -431,7 +470,7 @@ Relay stays local-first and safe around Git:
 
 - normal task, review, and summary commands do not auto-commit
 - `relay auto` can auto-commit only after verification succeeds
-- it never auto-pushes after an AI task
+- it only auto-pushes in explicit `--mode pr`
 - `relay commit` always asks before creating a commit
 - `relay push` always asks before pushing to GitHub
 

@@ -26,7 +26,7 @@ from relay_core.diagnose import diagnose_failure
 from relay_core.verifiers import run_verification, verification_passed
 from relay_core.memory import (
     ensure_relay_files, load_config, load_memory, save_memory,
-    append_repo_task, save_last_diff,
+    append_repo_task, save_last_diff, update_project_knowledge,
 )
 from relay_core.routing import route_task
 import relay_core.tui as tui
@@ -201,6 +201,12 @@ def run_auto(
 
             tui.show_info("Verifying...")
             verification = run_verification(repo.repo_root or repo.cwd, until, files, config)
+            update_project_knowledge(
+                repo,
+                verify_commands=[check.get("command", "") for check in verification.get("commands", []) if check.get("command")],
+                risky_files=[file for file in files if _risky_file(file)],
+                known_failure=(verification.get("tests", {}).get("output") or "")[:240] if not verification_passed(verification) else None,
+            )
             attempt = BrainAttempt(
                 attempt=attempt_index + 1,
                 agent=current_agent,
@@ -217,8 +223,14 @@ def run_auto(
                 commit_hash = ""
                 if auto_commit and permissions.can_commit:
                     commit_hash = _commit_branch(repo, task)
+                pr_target = ""
+                if commit_hash and permissions.can_push:
+                    from relay_core.brain import maybe_push_pr
+                    pr_target = maybe_push_pr(repo, branch)
                 run.status = "success"
                 run.commit_hash = commit_hash
+                if pr_target:
+                    run.escalate_reason = f"PR target: {pr_target}"
                 run.finished_at = timestamp_now()
                 _record_task(repo, run, success=True)
                 _update_agent_memory(repo, current_agent, files)
@@ -443,6 +455,11 @@ def _must_stop_for_risk(config: dict[str, Any], files: list[str], diff: str) -> 
     if "auth_changed" in stop_on and "auth" in lowered_files:
         return True
     return False
+
+
+def _risky_file(path: str) -> bool:
+    lowered = path.lower()
+    return any(marker in lowered for marker in (".env", "auth", "payment", "stripe", "migration", "secret"))
 
 
 def _halt(relay_dir: Path, run_dir: Path, run: AutoRun, status: str, reason: str) -> int:

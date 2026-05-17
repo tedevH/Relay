@@ -220,3 +220,31 @@ def save_project_profile(repo: RepoState, profile: dict[str, Any]) -> None:
     if not repo.project_path:
         return
     repo.project_path.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
+
+
+def update_project_knowledge(
+    repo: RepoState,
+    verify_commands: list[str] | None = None,
+    risky_files: list[str] | None = None,
+    known_failure: str | None = None,
+) -> None:
+    profile = load_project_profile(repo) or {}
+    if verify_commands:
+        existing = profile.get("verify_commands", [])
+        profile["verify_commands"] = sorted(set(existing + verify_commands))
+        tests = [cmd for cmd in profile["verify_commands"] if "test" in cmd or "pytest" in cmd]
+        builds = [cmd for cmd in profile["verify_commands"] if "build" in cmd]
+        if tests:
+            profile["test_commands"] = tests
+        if builds:
+            profile["build_commands"] = builds
+    if risky_files:
+        existing_risky = profile.get("risky_files", [])
+        profile["risky_files"] = sorted(set(existing_risky + risky_files))[:50]
+    if known_failure:
+        failures = profile.get("known_failures", [])
+        failures.append({"timestamp": timestamp_now(), "summary": known_failure[:240]})
+        profile["known_failures"] = failures[-20:]
+    if profile:
+        profile["updated_at"] = timestamp_now()
+        save_project_profile(repo, profile)

@@ -60,11 +60,13 @@ def run_verification(
             all_passed = False
 
     output = "\n\n".join(check["output"] for check in checks if check.get("output"))
-    done_met = _done_condition_hint(done_condition, output)
+    done_checks = _done_condition_checks(repo_root, done_condition, changed_files, output)
+    done_met = done_checks["passed"]
 
     return {
         "changed": len(changed_files) > 0,
         "commands": checks,
+        "done_checks": done_checks["checks"],
         "tests": {"passed": all_passed, "output": output[:3000]},
         "done_condition_met": done_met,
     }
@@ -123,6 +125,31 @@ def _split_command(command: str) -> list[str]:
     return shlex.split(command)
 
 
+def _done_condition_checks(
+    repo_root: Path,
+    done_condition: str,
+    changed_files: list[str],
+    output: str,
+) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    file_check = _file_exists_check(repo_root, done_condition)
+    if file_check:
+        checks.append(file_check)
+    endpoint_check = _endpoint_check(done_condition)
+    if endpoint_check:
+        checks.append(endpoint_check)
+    tests_added = _tests_added_check(done_condition, changed_files)
+    if tests_added:
+        checks.append(tests_added)
+    keyword = _done_condition_hint(done_condition, output)
+    if keyword is not None:
+        checks.append({"name": "done-condition-keyword", "passed": keyword})
+
+    if not checks:
+        return {"passed": None, "checks": []}
+    return {"passed": all(check["passed"] for check in checks), "checks": checks}
+
+
 def _done_condition_hint(done_condition: str, output: str) -> bool | None:
     if not done_condition or not output:
         return None
@@ -135,3 +162,42 @@ def _done_condition_hint(done_condition: str, output: str) -> bool | None:
         return None
     output_lower = output.lower()
     return any(keyword in output_lower for keyword in keywords)
+
+
+def _file_exists_check(repo_root: Path, done_condition: str) -> dict[str, Any] | None:
+    import re
+    match = re.search(r"(?:file|path)\s+[`'\"]?([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)[`'\"]?\s+(?:exists|exist|created)", done_condition, re.I)
+    if not match:
+        return None
+    rel = match.group(1).strip("/")
+    return {
+        "name": "file-exists",
+        "target": rel,
+        "passed": (repo_root / rel).exists(),
+    }
+
+
+def _endpoint_check(done_condition: str) -> dict[str, Any] | None:
+    import re
+    match = re.search(r"(https?://(?:localhost|127\.0\.0\.1)[^\s`'\"]+)", done_condition)
+    if not match:
+        return None
+    url = match.group(1)
+    try:
+        from urllib.request import urlopen
+        with urlopen(url, timeout=5) as response:
+            ok = 200 <= response.status < 400
+    except Exception:
+        ok = False
+    return {"name": "endpoint-responds", "target": url, "passed": ok}
+
+
+def _tests_added_check(done_condition: str, changed_files: list[str]) -> dict[str, Any] | None:
+    lowered = done_condition.lower()
+    if "test" not in lowered or not any(word in lowered for word in ("add", "added", "exist", "cover")):
+        return None
+    test_files = [
+        path for path in changed_files
+        if "test" in path.lower() or path.lower().endswith(("_test.go", ".spec.ts", ".spec.tsx", ".test.ts", ".test.tsx"))
+    ]
+    return {"name": "tests-added", "passed": bool(test_files), "files": test_files}

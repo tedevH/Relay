@@ -34,6 +34,22 @@ def _dispatch(command: str, value: str | None, repo: RepoState, **kwargs) -> int
     if command == "digest":       return run_digest(repo)
     if command == "auto":         return _cmd_auto(value or "", repo, **kwargs)
     if command == "plan":         return run_plan_cmd(value or "", repo)
+    if command == "brain":        return _cmd_brain(value or "", repo, **kwargs)
+    if command == "watch":
+        from relay_core.triggers import run_watch
+        return run_watch(value or "", repo)
+    if command == "every":
+        from relay_core.triggers import run_every
+        return run_every(value or "", repo)
+    if command == "on":
+        from relay_core.triggers import run_on
+        return run_on(value or "", repo)
+    if command == "triggers":
+        from relay_core.triggers import run_triggers
+        return run_triggers(repo)
+    if command == "trigger-check":
+        from relay_core.triggers import run_trigger_check
+        return run_trigger_check(repo)
     if command == "chain":
         from relay_core.chain import run_chain
         return run_chain(value or "", repo)
@@ -58,7 +74,7 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
     parameterless = {
         "doctor", "status", "review", "ai-review", "summary", "history",
         "commit", "push", "scan", "config", "dashboard", "interactive",
-        "init", "context", "digest",
+        "init", "context", "digest", "triggers", "trigger-check",
     }
     if command in parameterless:
         return command, None
@@ -66,11 +82,21 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
     if command == "audit":
         return "audit", "--ci" if "--ci" in argv[1:] else ""
 
-    if command in {"why", "continue", "chain", "plan"}:
+    if command in {"why", "continue", "chain", "plan", "watch", "every", "on"}:
         task = " ".join(a for a in argv[1:] if not a.startswith("--")).strip()
         if not task:
             raise ValueError(f"'{command}' requires a task argument")
         return command, task
+
+    if command == "brain":
+        if len(argv) > 1 and argv[1] in {"status", "resume", "logs", "stop", "rollback"}:
+            return "brain", argv[1]
+        task = _task_without_flags(argv[1:], {
+            "max-retries", "max-cost", "mode", "agent-policy", "max-steps",
+        })
+        if not task:
+            raise ValueError("'brain' requires a goal or subcommand")
+        return "brain", task
 
     if command == "auto":
         task = _task_without_flags(argv[1:], {
@@ -183,6 +209,24 @@ def _cmd_auto(task_str: str, repo: RepoState, **kwargs) -> int:
                         max_retries=max_retries, max_cost=max_cost,
                         mode=mode, agent_policy=agent_policy,
                         auto_commit=auto_commit, max_steps=max_steps)
+
+
+def _cmd_brain(value: str, repo: RepoState, **kwargs) -> int:
+    from relay_core.brain import (
+        run_brain, run_brain_status, run_brain_resume,
+        run_brain_logs, run_brain_stop, run_brain_rollback,
+    )
+    if value == "status":
+        return run_brain_status(repo)
+    if value == "resume":
+        return run_brain_resume(repo, **kwargs)
+    if value == "logs":
+        return run_brain_logs(repo)
+    if value == "stop":
+        return run_brain_stop(repo)
+    if value == "rollback":
+        return run_brain_rollback(repo)
+    return run_brain(value, repo, **kwargs)
 
 
 def _cmd_history(repo: RepoState) -> int:

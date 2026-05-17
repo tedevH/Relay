@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 MAX_HISTORY_DISPLAY = 20
 MAX_HANDOFF_WORDS = 250
 MAX_DIFF_PROMPT_CHARS = 6000
@@ -95,5 +95,5 @@ ALL_COMMANDS = [
     "review", "ai-review", "summary", "commit", "push", "doctor", "status",
     "history", "why", "continue", "chain", "dashboard", "audit",
     "config", "scan", "interactive", "init", "context", "digest",
-    "auto", "plan",
+    "auto", "plan", "brain", "watch", "every", "on", "triggers", "trigger-check",
 ]
