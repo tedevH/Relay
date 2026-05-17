@@ -2,9 +2,9 @@
 
 **Persistent memory and autonomous execution for Claude Code and Codex CLI.**
 
-AI coding agents forget everything when you close the terminal. Relay fixes that — and goes further, running tasks end-to-end without you watching.
+AI coding agents forget everything when you close the terminal. Relay fixes that - and goes further, running tasks end-to-end without you watching.
 
-Every task you run gets logged. Every commit is tracked. Before every session, Relay injects what your agent needs to know — which files are active, what changed recently, what decisions were made — so it stops starting cold.
+Every task you run gets logged. Every commit is tracked. Before every session, Relay injects what your agent needs to know - which files are active, what changed recently, what decisions were made - so it stops starting cold.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
 
 ## The problem
 
-You open Claude Code or Codex. It reads your entire codebase to understand the project — again. You explain the context — again. It makes the same mistakes it already made last week — because it doesn't remember last week.
+You open Claude Code or Codex. It reads your entire codebase to understand the project - again. You explain the context - again. It makes the same mistakes it already made last week - because it doesn't remember last week.
 
 This happens on every session, every switch between agents, every time you close the terminal.
 
@@ -22,14 +22,14 @@ This happens on every session, every switch between agents, every time you close
 
 Relay sits between you and your AI agents. It builds a memory of your project over time and feeds it back automatically before every session.
 
-- **Tracks every task and commit** — via a git post-commit hook that logs silently in the background
-- **Extracts symbols** — functions, routes, constants with exact file and line numbers
-- **Tracks workstreams** — groups related tasks into named feature threads
-- **Injects context before every session** — agents read `.relay/context.md` on startup and know your project without exploring it
+- **Tracks every task and commit** - via a git post-commit hook that logs silently in the background
+- **Extracts symbols** - functions, routes, constants with exact file and line numbers
+- **Tracks workstreams** - groups related tasks into named feature threads
+- **Injects context before every session** - agents read `.relay/context.md` on startup and know your project without exploring it
 
 The result: your agent starts sessions already knowing what changed, what's risky, and what the active workstream is.
 
-Relay also runs fully autonomous loops — give it a goal, it plans, executes, verifies, diagnoses failures, and retries until done. No human involvement between steps.
+Relay also runs fully autonomous loops - give it a goal, it plans, executes, verifies, diagnoses failures, and retries until done. No human involvement between steps.
 
 ---
 
@@ -65,7 +65,7 @@ relay push          # push with confirmation
 | Command | What it does |
 |---|---|
 | `relay "task"` | Routes to Claude or Codex, injects project context, runs |
-| `relay review` | Instant local risk check — files, contradictions, suggested commit message |
+| `relay review` | Instant local risk check - files, contradictions, suggested commit message |
 | `relay ai-review` | Deep AI review of the current diff |
 | `relay summary` | Diff summary with risk levels |
 | `relay commit` | Safe commit with smart message suggestion |
@@ -107,7 +107,7 @@ relay doctor           # check dependencies
 
 ## How memory works
 
-Running `relay init` installs a git post-commit hook. After every commit — whether you used Claude, Codex, or typed it yourself — Relay silently:
+Running `relay init` installs a git post-commit hook. After every commit - whether you used Claude, Codex, or typed it yourself - Relay silently:
 
 1. Extracts new symbols from the diff (functions, routes, constants)
 2. Classifies the active workstream
@@ -172,4 +172,4 @@ relay auto "fix the broken login flow" \
 
 ## License
 
-MIT — [LICENSE](LICENSE)
+MIT - [LICENSE](LICENSE)
