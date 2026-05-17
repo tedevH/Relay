@@ -402,7 +402,7 @@ Claude signals include:
 - Tailwind
 - CSS / HTML
 - landing page
-- dashboard
+- app shell
 - copy
 - animation
 - responsive
@@ -463,7 +463,7 @@ Relay warns when diffs touch risky areas like:
 ## Example Workflow
 
 ```bash
-relay "make the dashboard mobile responsive"
+relay "make the app shell mobile responsive"
 relay r
 relay s
 relay c

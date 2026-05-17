@@ -29,7 +29,6 @@ def default_config() -> dict[str, Any]:
         "stop_on": ["secret_detected", "migration_changed", "auth_changed"],
         "max_handoff_words": MAX_HANDOFF_WORDS,
         "shortcuts": {},
-        "dashboard_port": 7432,
         "review_agent_preference": "opposite",
         "frontend_paths": FRONTEND_PATHS,
         "backend_paths": BACKEND_PATHS,

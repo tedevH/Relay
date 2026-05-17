@@ -330,8 +330,6 @@ def _update_claude_md(repo: RepoState, task: str = "") -> None:
 
     relay_section += "### Project structure\n"
     relay_section += "- `relay_core/` — CLI engine (routing, commands, git ops, memory, TUI)\n"
-    relay_section += "- `relay_dashboard/templates/index.html` — the entire web dashboard UI\n"
-    relay_section += "- `relay_dashboard/server.py` — Flask server + API endpoints\n"
     relay_section += "- `relay_ci/` — CI audit tooling\n"
     relay_section += "- `.relay/` — local memory (tasks.json, context.md, config.json)\n\n"
 
@@ -644,7 +642,7 @@ def run_init(repo: RepoState) -> int:
     content.append("\n", style="")
     content.append("Every commit is now logged automatically.\n", style="dim")
     content.append("Run ", style="dim")
-    content.append("relay dashboard", style="bold cyan")
+    content.append("relay digest", style="bold cyan")
     content.append(" to see your project activity.", style="dim")
     tui.console.print(Panel(content, title="[bold white]Relay Initialised[/bold white]",
                             border_style="green", padding=(1, 2)))
@@ -716,15 +714,6 @@ def run_auto_cmd(
 def run_plan_cmd(goal: str, repo: RepoState, dry_run: bool = False) -> int:
     from relay_core.planner import run_plan
     return run_plan(goal, repo, dry_run=dry_run)
-
-
-def run_dashboard(repo: RepoState) -> int:
-    try:
-        from relay_dashboard.server import start_dashboard
-    except ImportError:
-        tui.show_error("Flask not installed. Run: pip install flask")
-        return 1
-    return start_dashboard(repo)
 
 
 def run_audit(repo: RepoState, ci_mode: bool = False) -> int:

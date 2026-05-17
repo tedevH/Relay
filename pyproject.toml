@@ -10,7 +10,6 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "rich>=13.0.0",
-  "flask>=3.0.0",
 ]
 
 [project.scripts]
@@ -18,8 +17,7 @@ relay = "relay_core.main:main"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["relay_core", "relay_dashboard", "relay_ci"]
+packages = ["relay_core", "relay_ci"]
 
 [tool.setuptools.package-data]
-relay_dashboard = ["templates/*.html"]
 relay_ci = ["relay-audit.yml"]

@@ -19,6 +19,16 @@ need() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    fail "missing checksum command: install shasum or sha256sum"
+  fi
+}
+
 detect_platform() {
   local os arch
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -61,15 +71,25 @@ main() {
   need chmod
   need mkdir
 
-  local asset tmp url latest_url target
+  local asset tmp checksums actual expected url latest_url checksum_url target
   asset="$(detect_platform)"
   tmp="$(mktemp -t relay.XXXXXX)"
+  checksums="$(mktemp -t relay-checksums.XXXXXX)"
   latest_url="https://github.com/${OWNER}/${REPO}/releases/latest/download/${asset}"
+  checksum_url="https://github.com/${OWNER}/${REPO}/releases/latest/download/SHA256SUMS"
   url="${RELAY_DOWNLOAD_URL:-$latest_url}"
 
   say "Installing Relay from:"
   say "  $url"
   download "$url" "$tmp" || fail "could not download ${asset}. Publish a GitHub Release first, or set GITHUB_TOKEN for private repos."
+
+  if [ -z "${RELAY_SKIP_CHECKSUM:-}" ]; then
+    download "${RELAY_CHECKSUM_URL:-$checksum_url}" "$checksums" || fail "could not download SHA256SUMS"
+    expected="$(awk -v file="$asset" '$2 == file {print $1}' "$checksums")"
+    [ -n "$expected" ] || fail "SHA256SUMS does not contain ${asset}"
+    actual="$(sha256 "$tmp")"
+    [ "$actual" = "$expected" ] || fail "checksum mismatch for ${asset}"
+  fi
 
   mkdir -p "$INSTALL_DIR"
   target="$INSTALL_DIR/$BINARY_NAME"

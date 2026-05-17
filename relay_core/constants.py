@@ -7,7 +7,6 @@ MAX_HANDOFF_WORDS = 250
 MAX_DIFF_PROMPT_CHARS = 6000
 MAX_HANDOFF_PROMPT_CHARS = 1800
 MAX_DECISIONS_LOG = 50
-DASHBOARD_PORT = 7432
 GLOBAL_CONFIG_DIR = Path.home() / ".relay"
 
 INSTALL_HINTS: dict[str, str] = {
@@ -35,7 +34,7 @@ SENSITIVE_PATH_PATTERNS = (
 FRONTEND_KEYWORDS = [
     "frontend", "ui", "ux", "react", "next.js", "nextjs",
     "component", "components", "tailwind", "css", "html",
-    "landing", "landing page", "dashboard", "copy",
+    "landing", "landing page", "copy",
     "animation", "responsive", "layout", "design",
     "hero", "navbar", "pricing", "form styling",
     "style", "styles", "styled", "theme", "icon",
@@ -93,7 +92,7 @@ FRAMEWORK_MARKERS: dict[str, str] = {
 
 ALL_COMMANDS = [
     "review", "ai-review", "summary", "commit", "push", "doctor", "status",
-    "history", "why", "continue", "chain", "dashboard", "audit",
+    "history", "why", "continue", "chain", "audit",
     "config", "scan", "interactive", "init", "context", "digest",
     "auto", "plan", "brain", "watch", "every", "on", "triggers", "trigger-check",
 ]

@@ -24,7 +24,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Relay dependencies
-        run: pip install rich flask
+        run: pip install rich
 
       - name: Run Relay audit
         id: relay-audit

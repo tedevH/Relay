@@ -80,6 +80,9 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -maxdepth 3 -type f -exec cp {} release/ \;
+          cd release
+          sha256sum relay-* > SHA256SUMS
+          cd ..
           ls -la release
 
       - uses: softprops/action-gh-release@v2

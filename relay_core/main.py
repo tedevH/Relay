@@ -10,7 +10,7 @@ import relay_core.tui as tui
 from relay_core.commands import (
     run_task, run_review, run_ai_review, run_summary,
     run_commit, run_push, run_scan, run_config,
-    run_dashboard, run_audit, run_init, run_context, run_digest,
+    run_audit, run_init, run_context, run_digest,
     run_auto_cmd, run_plan_cmd,
 )
 
@@ -27,7 +27,6 @@ def _dispatch(command: str, value: str | None, repo: RepoState, **kwargs) -> int
     if command == "history":      return _cmd_history(repo)
     if command == "scan":         return run_scan(repo)
     if command == "config":       return run_config(repo)
-    if command == "dashboard":    return run_dashboard(repo)
     if command == "audit":        return run_audit(repo, ci_mode=(value == "--ci"))
     if command == "init":         return run_init(repo)
     if command == "context":      return run_context(repo)
@@ -66,14 +65,14 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
     command = argv[0]
     alias_map = {
         "r": "review", "s": "summary", "c": "commit", "p": "push",
-        "h": "history", "help": "home", "d": "dashboard", "dash": "dashboard",
+        "h": "history", "help": "home",
         "i": "interactive",
     }
     command = alias_map.get(command, command)
 
     parameterless = {
         "doctor", "status", "review", "ai-review", "summary", "history",
-        "commit", "push", "scan", "config", "dashboard", "interactive",
+        "commit", "push", "scan", "config", "home", "interactive",
         "init", "context", "digest", "triggers", "trigger-check",
     }
     if command in parameterless:
@@ -271,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Fuzzy match on unknown single-word first arg
     first_arg = args[0].lower()
-    known = set(ALL_COMMANDS) | {"@claude", "@codex", "r", "s", "c", "p", "h", "d", "i", "help", "--version"}
+    known = set(ALL_COMMANDS) | {"@claude", "@codex", "r", "s", "c", "p", "h", "i", "help", "--version"}
     if (first_arg not in known and not first_arg.startswith("@")
             and len(args) == 1 and " " not in first_arg):
         suggestion = fuzzy_match_command(first_arg)
@@ -285,7 +284,10 @@ def main(argv: list[str] | None = None) -> int:
         tui.show_error("Usage: relay \"task\"  |  relay <command>  |  relay (interactive)")
         return 1
 
-    if command in {"home", "interactive"}:
+    if command == "home":
+        tui.show_home(repo, missing_required_dependencies())
+        return 0
+    if command == "interactive":
         return run_interactive(repo)
 
     diagnose_on_fail = "--diagnose-on-fail" in args

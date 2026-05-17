@@ -58,7 +58,6 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
         ("relay summary (s)", "diff summary with risk levels"),
         ("relay commit  (c)", "safe commit with confirmation"),
         ("relay push    (p)", "safe push with confirmation"),
-        ("relay dashboard", "open web dashboard at localhost:7432"),
         ("relay why \"task\"", "explain routing without running"),
         ("relay history", "view recent task history"),
         ("relay doctor", "check environment and dependencies"),

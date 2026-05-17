@@ -12,7 +12,7 @@ from relay_core.diff import classify_file_risk
 
 HOOK_SCRIPT = """\
 #!/bin/sh
-# Relay post-commit hook — logs every commit silently for memory and dashboard
+# Relay post-commit hook — logs every commit silently for memory
 python3 "{relay_py}" _hook-post-commit 2>/dev/null || true
 """
 
@@ -52,7 +52,7 @@ def hooks_installed(repo: RepoState) -> bool:
 
 def run_post_commit_hook(repo: RepoState) -> None:
     """Called by the git post-commit hook after every commit.
-    Silently logs the commit to .relay/ for memory and dashboard.
+    Silently logs the commit to .relay/ for memory.
     """
     if not repo.in_git_repo or not repo.relay_dir:
         return

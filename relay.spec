@@ -4,12 +4,10 @@ from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports = (
     collect_submodules("relay_core")
-    + collect_submodules("relay_dashboard")
     + collect_submodules("relay_ci")
 )
 
 datas = [
-    ("relay_dashboard/templates", "relay_dashboard/templates"),
     ("relay_ci/relay-audit.yml", "relay_ci"),
 ]
 

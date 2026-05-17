@@ -22,14 +22,11 @@ from relay_core.utils import timestamp_now
 # ── Workstream patterns ────────────────────────────────────────────────────
 
 WORKSTREAM_PATTERNS: dict[str, list[str]] = {
-    "dashboard_ui":      ["dashboard", "index.html", "chart", "overview", "card", "panel", "css", "style", "frontend", "ui"],
-    "dashboard_api":     ["api/version", "api/tasks", "api/memory", "api/diff", "server.py", "endpoint", "route", "flask"],
-    "terminal":          ["terminal", "term-", "runCmd", "stream", "sse"],
+    "terminal":          ["terminal", "term-", "stream", "cli"],
     "auth":              ["auth", "login", "logout", "session", "token", "signin"],
     "memory_system":     ["memory", "context", "handoff", "tasks.json", "workstream", "symbol"],
     "routing":           ["routing", "route_task", "route_decision", "codex", "claude", "agent"],
     "git_ops":           ["commit", "push", "diff", "hook", "post-commit"],
-    "dashboard_version": ["version", "VERSION", "api/version", "loadVersion"],
     "ci":                ["audit", "ci", "github", "action", "relay-audit"],
     "tui":               ["tui", "rich", "panel", "console", "spinner"],
 }
