@@ -22,7 +22,6 @@ Usage (Phase 2 — auto-loop, not yet built):
 from __future__ import annotations
 import json
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -214,69 +213,6 @@ def verify_task(
     done_condition: str,
     changed_files: list[str],
 ) -> dict[str, Any]:
-    """Run cheap verification checks before any LLM retry decision.
-
-    Returns:
-    {
-        "changed": bool,
-        "compiles": bool | None,    # None if not checkable
-        "tests": {"passed": bool | None, "output": str},
-        "done_condition_met": bool | None,
-    }
-    """
-    result: dict[str, Any] = {
-        "changed": len(changed_files) > 0,
-        "compiles": None,
-        "tests": {"passed": None, "output": ""},
-        "done_condition_met": None,
-    }
-
-    if not changed_files:
-        return result
-
-    # Detect test runner from repo root
-    test_output = ""
-    test_passed = None
-
-    if (repo_root / "package.json").exists():
-        r = subprocess.run(
-            ["npm", "test", "--", "--passWithNoTests"],
-            cwd=str(repo_root), capture_output=True, text=True, timeout=60,
-        )
-        test_output = r.stdout + r.stderr
-        test_passed = r.returncode == 0
-
-    elif (repo_root / "pytest.ini").exists() or (repo_root / "pyproject.toml").exists():
-        r = subprocess.run(
-            ["python", "-m", "pytest", "--tb=short", "-q"],
-            cwd=str(repo_root), capture_output=True, text=True, timeout=120,
-        )
-        test_output = r.stdout + r.stderr
-        test_passed = r.returncode == 0
-
-    elif (repo_root / "go.mod").exists():
-        r = subprocess.run(
-            ["go", "test", "./..."],
-            cwd=str(repo_root), capture_output=True, text=True, timeout=60,
-        )
-        test_output = r.stdout + r.stderr
-        test_passed = r.returncode == 0
-
-    elif (repo_root / "Cargo.toml").exists():
-        r = subprocess.run(
-            ["cargo", "test"],
-            cwd=str(repo_root), capture_output=True, text=True, timeout=120,
-        )
-        test_output = r.stdout + r.stderr
-        test_passed = r.returncode == 0
-
-    result["tests"] = {"passed": test_passed, "output": test_output[:3000]}
-
-    # Simple done-condition grep check (heuristic)
-    if done_condition and "passes" not in done_condition.lower():
-        keywords = re.findall(r'\b\w{4,}\b', done_condition.lower())
-        result["done_condition_met"] = any(
-            kw in test_output.lower() for kw in keywords
-        ) if test_output else None
-
-    return result
+    """Backward-compatible wrapper around Relay's verifier adapters."""
+    from relay_core.verifiers import run_verification
+    return run_verification(repo_root, done_condition, changed_files)

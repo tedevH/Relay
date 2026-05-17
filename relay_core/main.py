@@ -66,8 +66,17 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
     if command == "audit":
         return "audit", "--ci" if "--ci" in argv[1:] else ""
 
-    if command in {"why", "continue", "chain", "auto", "plan"}:
+    if command in {"why", "continue", "chain", "plan"}:
         task = " ".join(a for a in argv[1:] if not a.startswith("--")).strip()
+        if not task:
+            raise ValueError(f"'{command}' requires a task argument")
+        return command, task
+
+    if command == "auto":
+        task = _task_without_flags(argv[1:], {
+            "until", "max-retries", "max-cost", "mode",
+            "agent-policy", "max-steps",
+        })
         if not task:
             raise ValueError(f"'{command}' requires a task argument")
         return command, task
@@ -84,6 +93,22 @@ def parse_args(argv: list[str]) -> tuple[str, str | None]:
     if not task:
         raise ValueError("missing task")
     return "run", task
+
+
+def _task_without_flags(argv: list[str], value_flags: set[str]) -> str:
+    task_parts: list[str] = []
+    skip_next = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("--"):
+            name = arg[2:].split("=", 1)[0]
+            if "=" not in arg and name in value_flags:
+                skip_next = True
+            continue
+        task_parts.append(arg)
+    return " ".join(task_parts).strip()
 
 
 def run_interactive(repo: RepoState) -> int:
@@ -147,12 +172,17 @@ def _cmd_why(task: str, repo: RepoState) -> int:
 
 def _cmd_auto(task_str: str, repo: RepoState, **kwargs) -> int:
     """Parse --until, --max-retries, --max-cost from kwargs then run auto."""
-    import re
     until = kwargs.get("until")
     max_retries = int(kwargs.get("max_retries", 3))
     max_cost = float(kwargs.get("max_cost", 1.00))
+    mode = kwargs.get("mode")
+    agent_policy = kwargs.get("agent_policy")
+    auto_commit = kwargs.get("auto_commit")
+    max_steps = kwargs.get("max_steps")
     return run_auto_cmd(task_str, repo, until=until,
-                        max_retries=max_retries, max_cost=max_cost)
+                        max_retries=max_retries, max_cost=max_cost,
+                        mode=mode, agent_policy=agent_policy,
+                        auto_commit=auto_commit, max_steps=max_steps)
 
 
 def _cmd_history(repo: RepoState) -> int:
@@ -218,9 +248,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # Parse auto-loop flags
     def _flag(name: str, default: str) -> str:
-        for a in args:
-            if a.startswith(f"--{name}="):
+        flag = f"--{name}"
+        for idx, a in enumerate(args):
+            if a.startswith(f"{flag}="):
                 return a.split("=", 1)[1]
+            if a == flag and idx + 1 < len(args):
+                return args[idx + 1]
         return default
 
     dispatch_kwargs: dict = {
@@ -228,6 +261,10 @@ def main(argv: list[str] | None = None) -> int:
         "until": _flag("until", "") or None,
         "max_retries": int(_flag("max-retries", "3")),
         "max_cost": float(_flag("max-cost", "1.00")),
+        "mode": _flag("mode", "") or None,
+        "agent_policy": _flag("agent-policy", "") or None,
+        "auto_commit": False if "--no-auto-commit" in args else None,
+        "max_steps": int(_flag("max-steps", "0")) or None,
     }
 
     try:

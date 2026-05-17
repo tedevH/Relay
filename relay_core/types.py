@@ -67,6 +67,14 @@ class RepoState:
     def workstreams_path(self) -> Path | None:
         return self.relay_dir / "workstreams.json" if self.relay_dir else None
 
+    @property
+    def brain_path(self) -> Path | None:
+        return self.relay_dir / "brain.json" if self.relay_dir else None
+
+    @property
+    def runs_dir(self) -> Path | None:
+        return self.relay_dir / "runs" if self.relay_dir else None
+
 
 class RelayError(RuntimeError):
     pass

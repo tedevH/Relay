@@ -701,10 +701,16 @@ def run_auto_cmd(
     max_retries: int = 3,
     max_cost: float = 1.00,
     forced_agent: str | None = None,
+    mode: str | None = None,
+    agent_policy: str | None = None,
+    auto_commit: bool | None = None,
+    max_steps: int | None = None,
 ) -> int:
     from relay_core.auto import run_auto
     return run_auto(task, repo, until=until, max_retries=max_retries,
-                    max_cost=max_cost, forced_agent=forced_agent)
+                    max_cost=max_cost, forced_agent=forced_agent,
+                    mode=mode, agent_policy=agent_policy,
+                    auto_commit=auto_commit, max_steps=max_steps)
 
 
 def run_plan_cmd(goal: str, repo: RepoState, dry_run: bool = False) -> int:

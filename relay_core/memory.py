@@ -21,6 +21,12 @@ def default_config() -> dict[str, Any]:
         "custom_claude_keywords": [],
         "custom_codex_keywords": [],
         "require_review_before_commit": False,
+        "automation_mode": "edit",
+        "auto_commit_on_success": True,
+        "agent_policy": "balanced",
+        "verify_commands": [],
+        "max_auto_steps": 6,
+        "stop_on": ["secret_detected", "migration_changed", "auth_changed"],
         "max_handoff_words": MAX_HANDOFF_WORDS,
         "shortcuts": {},
         "dashboard_port": 7432,
@@ -70,6 +76,20 @@ def ensure_relay_files(repo: RepoState) -> None:
         repo.symbols_path.write_text("{}\n", encoding="utf-8")
     if repo.workstreams_path and not repo.workstreams_path.exists():
         repo.workstreams_path.write_text("{}\n", encoding="utf-8")
+    if repo.brain_path and not repo.brain_path.exists():
+        repo.brain_path.write_text(json.dumps(default_brain(), indent=2) + "\n", encoding="utf-8")
+    if repo.runs_dir:
+        repo.runs_dir.mkdir(parents=True, exist_ok=True)
+
+
+def default_brain() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "active_run_id": "",
+        "runs": [],
+        "agent_policy": "balanced",
+        "last_agents": [],
+    }
 
 
 def load_config(repo: RepoState) -> dict[str, Any]:

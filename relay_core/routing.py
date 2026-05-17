@@ -13,7 +13,7 @@ from relay_core.constants import (
 from relay_core.types import RouteDecision, RepoState
 from relay_core.utils import contains_phrase, extract_extensions, tokenize_text
 from relay_core.memory import (
-    load_repo_tasks, latest_task, recent_rate_limit,
+    load_repo_tasks, latest_task, latest_agent_task, recent_rate_limit,
     read_handoff, load_config, load_project_profile, save_project_profile,
 )
 from relay_core.utils import timestamp_now
@@ -181,12 +181,12 @@ def route_task(
     elif codex_score > claude_score:
         agent = "codex"
         reason = f"Backend/logic signals scored higher ({codex_score} vs {claude_score})."
-    elif clear_ui_detected:
-        agent = "claude"
-        reason = f"Scores tied at {claude_score}, clear UI language broke the tie for Claude."
     else:
-        agent = "codex"
-        reason = f"Scores tied at {claude_score}, defaulting to Codex for implementation tasks."
+        agent = _neutral_tiebreak(task, config, tasks, clear_ui_detected)
+        reason = (
+            f"Scores tied at {claude_score}; neutral balanced policy selected "
+            f"{agent.capitalize()}."
+        )
 
     return RouteDecision(
         agent=agent,
@@ -201,3 +201,31 @@ def route_task(
         rate_limit_penalty=penalties,
         handoff_influence=handoff_influence,
     )
+
+
+def _neutral_tiebreak(task: str, config: dict[str, Any], tasks: list[dict[str, Any]], clear_ui_detected: bool) -> str:
+    default_agent = config.get("default_agent")
+    if default_agent in {"claude", "codex"}:
+        return default_agent
+
+    policy = config.get("agent_policy", "balanced")
+    if policy == "ui_hint" and clear_ui_detected:
+        return "claude"
+
+    counts = {"claude": 0, "codex": 0}
+    for entry in tasks[-20:]:
+        agent = entry.get("selected_agent")
+        if agent in counts:
+            counts[agent] += 1
+    if counts["claude"] < counts["codex"]:
+        return "claude"
+    if counts["codex"] < counts["claude"]:
+        return "codex"
+
+    latest = latest_agent_task(tasks)
+    last_agent = latest.get("selected_agent") if latest else None
+    if last_agent == "claude":
+        return "codex"
+    if last_agent == "codex":
+        return "claude"
+    return "claude" if sum(ord(ch) for ch in task) % 2 == 0 else "codex"

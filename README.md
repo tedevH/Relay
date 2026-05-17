@@ -11,7 +11,7 @@ Relay is free to use as an app:
 - No database
 - No cloud sync
 - No API keys
-- No auto-commit
+- No hidden auto-commit
 - No auto-push
 
 Relay only shells out to software you already have installed locally.
@@ -20,6 +20,7 @@ Relay only shells out to software you already have installed locally.
 
 - Routes frontend/UI/design work to Claude by default
 - Routes backend/API/logic/test work to Codex by default
+- Balances tie-breaks and automation retries so Claude and Codex are treated as peers
 - Supports manual overrides with `@claude` and `@codex`
 - Refuses to run AI tasks unless `claude`, `codex`, and `git` are all installed
 - Saves repo-local memory inside `.relay/`
@@ -27,6 +28,7 @@ Relay only shells out to software you already have installed locally.
 - Lets you continue work with compact handoff context
 - Lets you review changes with the opposite agent
 - Summarizes the current diff locally
+- Runs an automation brain loop with `relay auto`: route, execute, verify, diagnose, retry/fallback, checkpoint
 - Lets you commit and push only after explicit confirmation
 
 ## Requirements
@@ -91,6 +93,10 @@ When you use Relay inside a git repo, it creates:
   decisions.md
   last-diff.patch
   config.json
+  memory.json
+  project.json
+  brain.json
+  runs/
 ```
 
 Relay reads these optional files if you already use them in your project:
@@ -234,6 +240,41 @@ Shows:
 - potential risks
 - suggested commit message
 
+### `relay auto "task"`
+
+Runs the automation brain:
+
+- infers a done-condition when `--until` is omitted
+- routes by task evidence, not by hard-coded agent preference
+- creates a dedicated `relay/auto/...` branch
+- executes the selected agent
+- runs local verification adapters such as `npm test`, `npm run build`, `pytest`, `go test`, or `cargo test`
+- diagnoses failures and retries with focused guidance
+- can fall back to the other agent under the balanced policy
+- saves durable state in `.relay/brain.json` and `.relay/runs/<run-id>/`
+- auto-commits on success when verification passes and policy allows it
+
+Examples:
+
+```bash
+relay auto "fix failing tests" --until "tests pass"
+relay auto "ship the auth polish" --mode edit --agent-policy balanced
+relay auto "try one agent only" --agent-policy route --no-auto-commit
+```
+
+Automation modes:
+
+- `safe`: no agent execution
+- `edit`: edits are allowed and verified success can auto-commit
+- `commit`: same commit behavior, explicit about commit-capable automation
+- `pr`: reserved for push/PR-capable workflows
+
+Agent policies:
+
+- `balanced`: route the first attempt, then alternate on retries when useful
+- `route`: keep the routed agent for all retries
+- `alternate`: start with the less-used agent from local Relay memory
+
 ### `relay commit`
 
 Prepares a local git commit safely.
@@ -330,16 +371,18 @@ Codex signals include:
 - validation
 - hints like `.py`, `.go`, `.rs`, `.sql`, `.java`, `.rb`, `.php`, `api/`, `server/`, `db/`, `migrations/`, `tests/`
 
-If scores tie, Relay defaults to Codex unless the task contains especially clear UI/design language.
+If scores tie, Relay uses neutral balancing. A configured `default_agent` wins; otherwise Relay chooses the less-used recent agent, then alternates from the last agent when counts are equal.
 
 ## Safety
 
 Relay will not:
 
 - ask for API keys
-- auto-commit
+- hide auto-commits from you
 - auto-push
 - modify `.env` files by itself
+
+`relay auto` may create a local commit after verification succeeds. This is controlled by `auto_commit_on_success` in `.relay/config.json` and can be disabled per run with `--no-auto-commit`.
 
 Relay warns when diffs touch risky areas like:
 
@@ -386,7 +429,8 @@ claude --permission-mode acceptEdits -p "your task"
 
 Relay stays local-first and safe around Git:
 
-- it never auto-commits after an AI task
+- normal task, review, and summary commands do not auto-commit
+- `relay auto` can auto-commit only after verification succeeds
 - it never auto-pushes after an AI task
 - `relay commit` always asks before creating a commit
 - `relay push` always asks before pushing to GitHub

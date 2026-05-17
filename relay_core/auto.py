@@ -1,177 +1,518 @@
 """
-Phase 2 — Autonomous Task Loop
-================================
-relay auto "task" --until "condition" --max-retries 3 --max-cost 1.00
+Relay Automation Brain
+======================
 
-Loop:
-  execute → verify (cheap) → pass: commit+exit | fail: diagnose → guided-execute → loop
+The brain loop is intentionally agent-neutral:
+  plan/context -> route -> execute -> verify -> diagnose -> retry/fallback -> checkpoint
 
-Critical constraints:
-  - --until is required. No task runs without a done-condition.
-  - Each retry = one diagnose + one execute. Budget tracks both.
-  - execute_with_guidance receives ONLY: task, done-condition, guidance, file context.
-    Not the prior error. Not the prior diff. Not the full diagnosis chain.
-  - Every run lands on its own branch or commit. One-click revertable.
-  - Hard stop on budget cap — leave branch for human review.
+Claude and Codex are peers. Routing chooses by task evidence; ties are balanced
+by recent usage/config; retries can fall back to the other agent when useful.
+Auto-commit is allowed after verification succeeds and policy permits it.
 """
 from __future__ import annotations
 import json
-import subprocess
+import re
+import uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
 from relay_core.types import RepoState, RelayError
 from relay_core.utils import timestamp_now, cli_available
-from relay_core.git import (
-    run_agent, changed_files, current_diff,
-    current_branch, git_output, run_command,
-)
+from relay_core.git import run_agent, changed_files, current_diff, current_branch, run_command
 from relay_core.cleaner import save_output
-from relay_core.models import call, classify_task, infer_done_condition, session_cost, flush_costs
-from relay_core.diagnose import diagnose_failure, verify_task
-from relay_core.memory import ensure_relay_files, load_repo_tasks, save_repo_tasks
+from relay_core.models import classify_task, infer_done_condition, session_cost, flush_costs
+from relay_core.diagnose import diagnose_failure
+from relay_core.verifiers import run_verification, verification_passed
+from relay_core.memory import (
+    ensure_relay_files, load_config, load_memory, save_memory,
+    append_repo_task, save_last_diff,
+)
+from relay_core.routing import route_task
 import relay_core.tui as tui
 
 
-# ── Run record (persisted to .relay/auto-runs.json) ───────────────────────
+AGENTS = ("claude", "codex")
+AUTO_MODES = {"safe", "edit", "commit", "pr"}
+AGENT_POLICIES = {"balanced", "route", "alternate"}
+
+
+@dataclass
+class BrainPermissions:
+    mode: str
+    can_execute: bool
+    can_edit: bool
+    can_commit: bool
+    can_push: bool
+
+
+@dataclass
+class BrainAttempt:
+    attempt: int
+    agent: str
+    prompt_kind: str
+    exit_code: int
+    files_changed: list[str]
+    verification: dict[str, Any]
+    diagnosis: dict[str, Any] | None = None
+    started_at: str = ""
+    finished_at: str = ""
+
 
 @dataclass
 class AutoRun:
     id: str
     task: str
     done_condition: str
-    agent: str
+    initial_agent: str
+    current_agent: str
+    agent_policy: str
     tier: str
     branch: str
-    status: str          # running | success | failed | escalated | capped
+    status: str
+    permissions: dict[str, Any]
     retries_used: int
     max_retries: int
     cost_usd: float
     max_cost: float
+    auto_commit: bool
     files_changed: list[str]
-    diagnoses: list[dict]
-    started_at: str
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    started_at: str = ""
     finished_at: str = ""
     commit_hash: str = ""
     escalate_reason: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def _load_runs(relay_dir: Path) -> list[dict]:
-    p = relay_dir / "auto-runs.json"
-    if not p.exists():
-        return []
+def run_auto(
+    task: str,
+    repo: RepoState,
+    until: str | None = None,
+    max_retries: int = 3,
+    max_cost: float = 1.00,
+    forced_agent: str | None = None,
+    mode: str | None = None,
+    agent_policy: str | None = None,
+    auto_commit: bool | None = None,
+    max_steps: int | None = None,
+) -> int:
+    if not cli_available("git"):
+        raise RelayError("relay auto requires git.")
+    if not repo.in_git_repo:
+        raise RelayError("relay auto requires running inside a git repository.")
+
+    ensure_relay_files(repo)
+    relay_dir = repo.relay_dir
+    assert relay_dir is not None
+
+    config = load_config(repo)
+    mode = _normalize_mode(mode or config.get("automation_mode", "edit"))
+    agent_policy = _normalize_agent_policy(agent_policy or config.get("agent_policy", "balanced"))
+    permissions = _permissions_for_mode(mode)
+    auto_commit = bool(config.get("auto_commit_on_success", True) if auto_commit is None else auto_commit)
+    max_steps = max_steps or int(config.get("max_auto_steps", 6))
+
+    if not permissions.can_execute:
+        tui.show_info("Safe mode selected: Relay will not execute an agent or edit files.")
+        return 0
+
+    _require_agent_tools(forced_agent)
+
+    tui.show_info("Classifying task...")
+    classification = classify_task(task, relay_dir=relay_dir)
+    tier = classification.get("tier", "feature")
+
+    if not until:
+        tui.show_info("Inferring done-condition...")
+        until = infer_done_condition(task, relay_dir=relay_dir)
+
+    decision = route_task(task, repo, forced_agent=forced_agent)
+    initial_agent = _select_initial_agent(decision.agent, repo, agent_policy, forced_agent, task)
+    current_agent = initial_agent
+
+    original_branch = current_branch(repo)
+    branch = _create_branch(repo, task)
+    run_id = str(uuid.uuid4())[:8]
+    run_dir = _prepare_run_dir(relay_dir, run_id)
+
+    run = AutoRun(
+        id=run_id,
+        task=task,
+        done_condition=until,
+        initial_agent=initial_agent,
+        current_agent=current_agent,
+        agent_policy=agent_policy,
+        tier=tier,
+        branch=branch,
+        status="running",
+        permissions=asdict(permissions),
+        retries_used=0,
+        max_retries=max_retries,
+        cost_usd=0.0,
+        max_cost=max_cost,
+        auto_commit=auto_commit,
+        files_changed=[],
+        started_at=timestamp_now(),
+    )
+    _save_run(relay_dir, run_dir, run)
+    _show_auto_header(run, decision.reason)
+
+    prior_diagnosis: dict[str, Any] | None = None
+
     try:
-        return json.loads(p.read_text())
-    except Exception:
-        return []
+        for attempt_index in range(min(max_retries + 1, max_steps)):
+            if run.cost_usd >= max_cost:
+                return _halt(relay_dir, run_dir, run, "capped", f"Budget cap ${max_cost:.2f} reached.")
+
+            prompt_kind = "guided-retry" if prior_diagnosis else "initial"
+            prompt = _build_prompt(task, until, prior_diagnosis)
+            started = timestamp_now()
+            tui.console.print(
+                f"\n[bold white]Attempt {attempt_index + 1}/{max_retries + 1}[/bold white]  "
+                f"[dim]{current_agent.capitalize()}[/dim]\n"
+            )
+
+            from relay_core.commands import _write_context
+            _write_context(repo, prompt)
+
+            exit_code, output, _resumed = run_agent(
+                current_agent,
+                prompt,
+                repo.repo_root or repo.cwd,
+                relay_dir=relay_dir,
+            )
+            clean = save_output(relay_dir, current_agent, output)
+            _write_attempt_log(run_dir, attempt_index + 1, current_agent, clean)
+            run.cost_usd += session_cost()
+
+            if clean.strip():
+                tui.show_review_output(current_agent, clean, exit_code)
+
+            files = changed_files(repo)
+            diff = current_diff(repo)
+            save_last_diff(repo, diff)
+            run.files_changed = files
+
+            if _must_stop_for_risk(config, files, diff):
+                return _halt(relay_dir, run_dir, run, "escalated", "Risk policy matched changed files or diff.")
+
+            tui.show_info("Verifying...")
+            verification = run_verification(repo.repo_root or repo.cwd, until, files, config)
+            attempt = BrainAttempt(
+                attempt=attempt_index + 1,
+                agent=current_agent,
+                prompt_kind=prompt_kind,
+                exit_code=exit_code,
+                files_changed=files,
+                verification=verification,
+                started_at=started,
+                finished_at=timestamp_now(),
+            )
+
+            if exit_code == 0 and verification_passed(verification):
+                run.attempts.append(asdict(attempt))
+                commit_hash = ""
+                if auto_commit and permissions.can_commit:
+                    commit_hash = _commit_branch(repo, task)
+                run.status = "success"
+                run.commit_hash = commit_hash
+                run.finished_at = timestamp_now()
+                _record_task(repo, run, success=True)
+                _update_agent_memory(repo, current_agent, files)
+                flush_costs(relay_dir)
+                _save_run(relay_dir, run_dir, run)
+                _show_auto_result(run)
+                return 0
+
+            if attempt_index >= max_retries:
+                attempt.diagnosis = None
+                run.attempts.append(asdict(attempt))
+                break
+
+            tui.show_info("Diagnosing failure...")
+            error_output = verification.get("tests", {}).get("output") or clean[-2000:]
+            diagnosis = diagnose_failure(
+                task=task,
+                done_condition=until,
+                diff=diff[:4000],
+                error=error_output,
+                prior_diagnosis=prior_diagnosis,
+                relay_dir=relay_dir,
+            )
+            run.cost_usd += session_cost()
+            attempt.diagnosis = diagnosis
+            run.attempts.append(asdict(attempt))
+            _save_run(relay_dir, run_dir, run)
+
+            if not diagnosis.get("should_retry"):
+                return _halt(
+                    relay_dir,
+                    run_dir,
+                    run,
+                    "escalated",
+                    diagnosis.get("escalate_reason") or "Diagnosis recommended manual review.",
+                )
+
+            prior_diagnosis = diagnosis
+            run.retries_used += 1
+            current_agent = _next_agent(current_agent, agent_policy, forced_agent)
+            run.current_agent = current_agent
+            _show_retry_header(run.retries_used, max_retries, current_agent, diagnosis.get("guidance", ""))
+
+        run.status = "failed"
+        run.finished_at = timestamp_now()
+        _record_task(repo, run, success=False)
+        flush_costs(relay_dir)
+        _save_run(relay_dir, run_dir, run)
+        _show_auto_result(run)
+        return 1
+
+    except KeyboardInterrupt:
+        run.status = "failed"
+        run.finished_at = timestamp_now()
+        run.escalate_reason = "Interrupted by user."
+        _save_run(relay_dir, run_dir, run)
+        tui.show_info(f"\nInterrupted. Branch preserved: {branch}")
+        return 1
+    finally:
+        _return_to_original(repo, original_branch)
 
 
-def _save_run(relay_dir: Path, run: AutoRun) -> None:
-    runs = _load_runs(relay_dir)
-    # Update existing or append
-    for i, r in enumerate(runs):
-        if r.get("id") == run.id:
-            runs[i] = run.to_dict()
-            break
-    else:
-        runs.append(run.to_dict())
-    (relay_dir / "auto-runs.json").write_text(json.dumps(runs[-50:], indent=2))
+def _normalize_mode(mode: str) -> str:
+    if mode not in AUTO_MODES:
+        raise RelayError(f"Unknown automation mode '{mode}'. Use: {', '.join(sorted(AUTO_MODES))}.")
+    return mode
 
 
-# ── Branch management ──────────────────────────────────────────────────────
+def _normalize_agent_policy(policy: str) -> str:
+    if policy not in AGENT_POLICIES:
+        raise RelayError(f"Unknown agent policy '{policy}'. Use: {', '.join(sorted(AGENT_POLICIES))}.")
+    return policy
+
+
+def _permissions_for_mode(mode: str) -> BrainPermissions:
+    return BrainPermissions(
+        mode=mode,
+        can_execute=mode != "safe",
+        can_edit=mode in {"edit", "commit", "pr"},
+        can_commit=mode in {"edit", "commit", "pr"},
+        can_push=mode == "pr",
+    )
+
+
+def _require_agent_tools(forced_agent: str | None) -> None:
+    required = [forced_agent] if forced_agent in AGENTS else list(AGENTS)
+    missing = [agent for agent in required if not cli_available(agent)]
+    if missing:
+        raise RelayError("Missing required agent tools: " + ", ".join(missing))
+
+
+def _select_initial_agent(agent: str, repo: RepoState, policy: str, forced_agent: str | None, task: str) -> str:
+    if forced_agent in AGENTS:
+        return forced_agent
+    if policy == "alternate":
+        return _least_recent_agent(repo, task)
+    return agent
+
+
+def _next_agent(current_agent: str, policy: str, forced_agent: str | None) -> str:
+    if forced_agent in AGENTS or policy == "route":
+        return current_agent
+    return "codex" if current_agent == "claude" else "claude"
+
+
+def _least_recent_agent(repo: RepoState, task: str) -> str:
+    mem = load_memory(repo)
+    stats = mem.get("agent_stats", {})
+    claude = int(stats.get("claude", 0))
+    codex = int(stats.get("codex", 0))
+    if claude < codex:
+        return "claude"
+    if codex < claude:
+        return "codex"
+    return "claude" if sum(ord(ch) for ch in task) % 2 == 0 else "codex"
+
 
 def _create_branch(repo: RepoState, task: str) -> str:
-    """Create a dedicated branch for this autonomous run."""
-    slug = task.lower()[:40]
-    import re
-    slug = re.sub(r'[^a-z0-9]+', '-', slug).strip('-')
-    ts = timestamp_now()[:10]
+    slug = re.sub(r"[^a-z0-9]+", "-", task.lower()[:48]).strip("-") or "task"
+    ts = re.sub(r"[^0-9]", "", timestamp_now())[:14]
     branch = f"relay/auto/{ts}/{slug}"
-    run_command(["git", "checkout", "-b", branch], cwd=repo.repo_root)
+    result = run_command(["git", "checkout", "-b", branch], cwd=repo.repo_root)
+    if result.returncode != 0:
+        raise RelayError(result.stderr.strip() or "Unable to create automation branch.")
     return branch
 
 
-def _commit_branch(repo: RepoState, task: str, branch: str) -> str:
-    """Commit all changes on the auto branch."""
+def _commit_branch(repo: RepoState, task: str) -> str:
+    if not changed_files(repo):
+        return ""
     run_command(["git", "add", "."], cwd=repo.repo_root)
     msg = f"relay auto: {task[:72]}"
     result = run_command(["git", "commit", "-m", msg], cwd=repo.repo_root)
     if result.returncode != 0:
+        tui.show_error(result.stderr.strip() or "Auto-commit failed.")
         return ""
     hash_result = run_command(["git", "rev-parse", "--short", "HEAD"], cwd=repo.repo_root)
     return hash_result.stdout.strip()
 
 
 def _return_to_original(repo: RepoState, original_branch: str) -> None:
-    run_command(["git", "checkout", original_branch], cwd=repo.repo_root)
+    if original_branch:
+        run_command(["git", "checkout", original_branch], cwd=repo.repo_root)
 
 
-# ── Guided prompt builder ──────────────────────────────────────────────────
-
-def _build_guided_prompt(task: str, done_condition: str, guidance: str) -> str:
-    """Build the execute-with-guidance prompt.
-
-    Per spec: receives ONLY task + done-condition + guidance.
-    Not the prior error, not the diff, not the diagnosis chain.
-    """
+def _build_prompt(task: str, done_condition: str, diagnosis: dict[str, Any] | None) -> str:
+    if not diagnosis:
+        return f"Task: {task}\n\nDone when: {done_condition}"
+    guidance = diagnosis.get("guidance", "")
     return (
         f"Task: {task}\n\n"
         f"Done when: {done_condition}\n\n"
-        f"Guidance from previous attempt: {guidance}"
+        f"Guidance from verification diagnosis: {guidance}"
     )
 
 
-# ── Tier → agent mapping ───────────────────────────────────────────────────
+def _prepare_run_dir(relay_dir: Path, run_id: str) -> Path:
+    run_dir = relay_dir / "runs" / run_id
+    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
+    return run_dir
 
-def _tier_to_agent(tier: str) -> str:
-    return {"trivial": "codex", "feature": "claude", "architectural": "claude"}.get(tier, "claude")
+
+def _save_run(relay_dir: Path, run_dir: Path, run: AutoRun) -> None:
+    data = run.to_dict()
+    (run_dir / "run.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _save_run_index(relay_dir, data)
+    _save_brain_state(relay_dir, run)
 
 
-# ── Done-condition check ───────────────────────────────────────────────────
+def _save_run_index(relay_dir: Path, data: dict[str, Any]) -> None:
+    path = relay_dir / "auto-runs.json"
+    runs = []
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            runs = loaded if isinstance(loaded, list) else []
+        except Exception:
+            runs = []
+    for idx, item in enumerate(runs):
+        if item.get("id") == data.get("id"):
+            runs[idx] = data
+            break
+    else:
+        runs.append(data)
+    path.write_text(json.dumps(runs[-50:], indent=2) + "\n", encoding="utf-8")
 
-def _is_done(until: str, verify: dict) -> bool:
-    tests = verify.get("tests", {})
-    if tests.get("passed") is True:
+
+def _save_brain_state(relay_dir: Path, run: AutoRun) -> None:
+    path = relay_dir / "brain.json"
+    state: dict[str, Any] = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            state = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            state = {}
+    runs = [r for r in state.get("runs", []) if r.get("id") != run.id]
+    runs.append({"id": run.id, "task": run.task, "status": run.status, "branch": run.branch})
+    state.update({
+        "version": 1,
+        "active_run_id": run.id if run.status == "running" else "",
+        "runs": runs[-20:],
+        "agent_policy": run.agent_policy,
+        "last_agents": [a.get("agent") for a in run.attempts[-10:] if a.get("agent")],
+    })
+    path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_attempt_log(run_dir: Path, attempt: int, agent: str, output: str) -> None:
+    path = run_dir / "logs" / f"attempt-{attempt}-{agent}.log"
+    path.write_text(output, encoding="utf-8")
+
+
+def _must_stop_for_risk(config: dict[str, Any], files: list[str], diff: str) -> bool:
+    stop_on = set(config.get("stop_on", []))
+    lowered_files = " ".join(files).lower()
+    lowered_diff = diff.lower()
+    if "secret_detected" in stop_on and any(word in lowered_diff for word in ("api_key", "secret", "password", "private key")):
         return True
-    if verify.get("done_condition_met") is True:
+    if "migration_changed" in stop_on and "migration" in lowered_files:
+        return True
+    if "auth_changed" in stop_on and "auth" in lowered_files:
         return True
     return False
 
 
-# ── Display helpers ────────────────────────────────────────────────────────
+def _halt(relay_dir: Path, run_dir: Path, run: AutoRun, status: str, reason: str) -> int:
+    run.status = status
+    run.escalate_reason = reason
+    run.finished_at = timestamp_now()
+    flush_costs(relay_dir)
+    _save_run(relay_dir, run_dir, run)
+    _show_auto_result(run)
+    return 1
 
-def _show_auto_header(task: str, until: str, tier: str, agent: str,
-                       max_retries: int, max_cost: float, branch: str) -> None:
+
+def _record_task(repo: RepoState, run: AutoRun, success: bool) -> None:
+    append_repo_task(repo, {
+        "command_type": "auto",
+        "timestamp": timestamp_now(),
+        "original_task": run.task,
+        "selected_agent": run.current_agent,
+        "initial_agent": run.initial_agent,
+        "agent_policy": run.agent_policy,
+        "exit_code": 0 if success else 1,
+        "success": success,
+        "changed_files": run.files_changed,
+        "auto_run_id": run.id,
+        "branch": run.branch,
+        "commit_hash": run.commit_hash,
+    })
+
+
+def _update_agent_memory(repo: RepoState, agent: str, files: list[str]) -> None:
+    mem = load_memory(repo)
+    stats = mem.get("agent_stats", {"claude": 0, "codex": 0})
+    stats[agent] = stats.get(agent, 0) + 1
+    mem["agent_stats"] = stats
+    hot = mem.get("hot_files", {})
+    for file in files:
+        hot[file] = hot.get(file, 0) + 1
+    mem["hot_files"] = dict(sorted(hot.items(), key=lambda item: item[1], reverse=True)[:50])
+    save_memory(repo, mem)
+
+
+def _show_auto_header(run: AutoRun, routing_reason: str) -> None:
     from rich.panel import Panel
     from rich.text import Text
     from relay_core.tui import console, AGENT_COLORS
 
-    color = AGENT_COLORS.get(agent, "white")
+    color = AGENT_COLORS.get(run.initial_agent, "white")
     content = Text()
     content.append("Task         ", style="dim white")
-    content.append(task + "\n", style="bold white")
+    content.append(run.task + "\n", style="bold white")
     content.append("Done when    ", style="dim white")
-    content.append(until + "\n", style="white")
+    content.append(run.done_condition + "\n", style="white")
     content.append("Agent        ", style="dim white")
-    content.append(agent.capitalize() + f"  [{tier}]\n", style=color)
-    content.append("Max retries  ", style="dim white")
-    content.append(f"{max_retries}\n", style="white")
-    content.append("Budget cap   ", style="dim white")
-    content.append(f"${max_cost:.2f}\n", style="white")
+    content.append(run.initial_agent.capitalize() + f"  [{run.agent_policy}]\n", style=color)
+    content.append("Routing      ", style="dim white")
+    content.append(routing_reason + "\n", style="dim")
+    content.append("Mode         ", style="dim white")
+    content.append(run.permissions.get("mode", "edit") + "\n", style="white")
+    content.append("Auto commit  ", style="dim white")
+    content.append(("yes" if run.auto_commit else "no") + "\n", style="white")
     content.append("Branch       ", style="dim white")
-    content.append(branch, style="dim cyan")
-    console.print(Panel(content, title="[bold white]⚡ Relay Auto[/bold white]",
+    content.append(run.branch, style="dim cyan")
+    console.print(Panel(content, title="[bold white]Relay Automation Brain[/bold white]",
                          border_style="cyan", padding=(0, 1)))
 
 
-def _show_retry_header(attempt: int, max_retries: int, guidance: str) -> None:
+def _show_retry_header(attempt: int, max_retries: int, agent: str, guidance: str) -> None:
     tui.console.print(
         f"\n[bold yellow]Retry {attempt}/{max_retries}[/bold yellow]  "
-        f"[dim]Guidance: {guidance[:80]}[/dim]\n"
+        f"[dim]Next agent: {agent.capitalize()} | {guidance[:90]}[/dim]\n"
     )
 
 
@@ -182,196 +523,33 @@ def _show_auto_result(run: AutoRun) -> None:
 
     success = run.status == "success"
     color = "green" if success else "red"
-    icon = "✓" if success else "✗"
-
+    icon = "OK" if success else "STOP"
     content = Text()
-    content.append(f"Status       ", style="dim white")
+    content.append("Status       ", style="dim white")
     content.append(f"{icon} {run.status}\n", style=f"bold {color}")
-    content.append("Retries      ", style="dim white")
-    content.append(f"{run.retries_used}/{run.max_retries}\n", style="white")
-    content.append("Cost         ", style="dim white")
+    content.append("Attempts     ", style="dim white")
+    content.append(f"{len(run.attempts)}\n", style="white")
+    content.append("Agents       ", style="dim white")
+    content.append(", ".join(a.get("agent", "") for a in run.attempts) or run.initial_agent, style="white")
+    content.append("\nCost         ", style="dim white")
     content.append(f"${run.cost_usd:.4f}\n", style="white")
     content.append("Branch       ", style="dim white")
     content.append(run.branch + "\n", style="dim cyan")
     if run.commit_hash:
         content.append("Commit       ", style="dim white")
-        content.append(run.commit_hash, style="dim")
+        content.append(run.commit_hash + "\n", style="dim")
     if run.files_changed:
-        content.append("\nChanged      ", style="dim white")
-        content.append(", ".join(run.files_changed[:5]), style="dim")
-
-    if run.status == "escalated":
-        content.append(f"\n\nEscalated    ", style="dim white")
+        content.append("Changed      ", style="dim white")
+        content.append(", ".join(run.files_changed[:6]) + "\n", style="dim")
+    if run.escalate_reason:
+        content.append("Reason       ", style="dim white")
         content.append(run.escalate_reason, style="bold yellow")
 
-    console.print(Panel(content, title=f"[bold white]Auto Run {'Complete' if success else 'Halted'}[/bold white]",
+    console.print(Panel(content, title="[bold white]Automation Result[/bold white]",
                          border_style=color, padding=(0, 1)))
-
-    if run.status == "success":
-        tui.show_info(f"To merge: git merge {run.branch}")
+    if success and run.commit_hash:
+        tui.show_info(f"Committed on {run.branch}. Merge when ready.")
+    elif success:
+        tui.show_info(f"Changes are on {run.branch}.")
     else:
-        tui.show_info(f"To review: git checkout {run.branch}")
-        tui.show_info(f"To discard: git branch -D {run.branch}")
-
-
-# ── Main auto loop ─────────────────────────────────────────────────────────
-
-def run_auto(
-    task: str,
-    repo: RepoState,
-    until: str | None = None,
-    max_retries: int = 3,
-    max_cost: float = 1.00,
-    forced_agent: str | None = None,
-) -> int:
-    """Phase 2 — autonomous task loop."""
-    if not cli_available("git"):
-        raise RelayError("relay auto requires git.")
-    if not repo.in_git_repo:
-        raise RelayError("relay auto requires running inside a git repository.")
-
-    ensure_relay_files(repo)
-    relay_dir = repo.relay_dir
-    assert relay_dir is not None
-
-    # Classify task tier (Haiku)
-    tui.show_info("Classifying task...")
-    classification = classify_task(task, relay_dir=relay_dir)
-    tier = classification.get("tier", "feature")
-
-    # Infer done-condition (Haiku) if not provided
-    if not until:
-        tui.show_info("Inferring done-condition...")
-        until = infer_done_condition(task, relay_dir=relay_dir)
-
-    # Determine agent
-    agent = forced_agent or _tier_to_agent(tier)
-
-    # Save original branch, create auto branch
-    original_branch = current_branch(repo)
-    branch = _create_branch(repo, task)
-
-    import uuid
-    run_id = str(uuid.uuid4())[:8]
-
-    run = AutoRun(
-        id=run_id,
-        task=task,
-        done_condition=until,
-        agent=agent,
-        tier=tier,
-        branch=branch,
-        status="running",
-        retries_used=0,
-        max_retries=max_retries,
-        cost_usd=0.0,
-        max_cost=max_cost,
-        files_changed=[],
-        diagnoses=[],
-        started_at=timestamp_now(),
-    )
-    _save_run(relay_dir, run)
-
-    _show_auto_header(task, until, tier, agent, max_retries, max_cost, branch)
-    prior_diagnosis: dict | None = None
-
-    try:
-        for attempt in range(max_retries + 1):
-            # Budget check
-            if run.cost_usd >= max_cost:
-                tui.show_error(f"Budget cap ${max_cost:.2f} reached after {attempt} attempts.")
-                run.status = "capped"
-                run.finished_at = timestamp_now()
-                _save_run(relay_dir, run)
-                _show_auto_result(run)
-                return 1
-
-            # Build prompt
-            if prior_diagnosis and prior_diagnosis.get("guidance"):
-                _show_retry_header(attempt, max_retries, prior_diagnosis["guidance"])
-                prompt = _build_guided_prompt(task, until, prior_diagnosis["guidance"])
-            else:
-                tui.console.print(f"\n[bold white]Attempt {attempt + 1}/{max_retries + 1}[/bold white]\n")
-                prompt = task
-
-            # Execute
-            from relay_core.commands import _write_context
-            _write_context(repo, prompt)
-
-            exit_code, output, resumed = run_agent(
-                agent, prompt,
-                repo.repo_root or repo.cwd,
-                relay_dir=relay_dir,
-            )
-            clean = save_output(relay_dir, agent, output)
-            run.cost_usd += session_cost()
-
-            if clean.strip():
-                tui.show_review_output(agent, clean, exit_code)
-
-            files = changed_files(repo)
-            run.files_changed = files
-
-            # Verify (cheap — no LLM)
-            tui.show_info("Verifying...")
-            verify = verify_task(repo.repo_root or repo.cwd, until, files)
-
-            if _is_done(until, verify):
-                # Success — commit and exit
-                commit_hash = _commit_branch(repo, task, branch)
-                run.status = "success"
-                run.commit_hash = commit_hash
-                run.finished_at = timestamp_now()
-                flush_costs(relay_dir)
-                _save_run(relay_dir, run)
-                _show_auto_result(run)
-                return 0
-
-            if attempt >= max_retries:
-                break
-
-            # Diagnose failure
-            tui.show_info("Diagnosing failure...")
-            diff = current_diff(repo)
-            error_output = verify["tests"]["output"] or clean[-2000:]
-
-            diagnosis = diagnose_failure(
-                task=task,
-                done_condition=until,
-                diff=diff[:4000],
-                error=error_output,
-                prior_diagnosis=prior_diagnosis,
-                relay_dir=relay_dir,
-            )
-            run.diagnoses.append(diagnosis)
-            run.cost_usd += session_cost()
-            _save_run(relay_dir, run)
-
-            if not diagnosis["should_retry"]:
-                run.status = "escalated"
-                run.escalate_reason = diagnosis.get("escalate_reason", "")
-                run.finished_at = timestamp_now()
-                flush_costs(relay_dir)
-                _save_run(relay_dir, run)
-                _show_auto_result(run)
-                return 1
-
-            prior_diagnosis = diagnosis
-            run.retries_used += 1
-
-        # Max retries hit
-        run.status = "failed"
-        run.finished_at = timestamp_now()
-        flush_costs(relay_dir)
-        _save_run(relay_dir, run)
-        _show_auto_result(run)
-        return 1
-
-    except KeyboardInterrupt:
-        run.status = "failed"
-        run.finished_at = timestamp_now()
-        _save_run(relay_dir, run)
-        tui.show_info(f"\nInterrupted. Branch preserved: {branch}")
-        return 1
-    finally:
-        _return_to_original(repo, original_branch)
+        tui.show_info(f"Review branch: git checkout {run.branch}")

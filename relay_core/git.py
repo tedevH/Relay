@@ -28,7 +28,12 @@ def ensure_local_git_exclude(repo: RepoState) -> None:
     if any(line.strip() == ".relay/" for line in existing_lines):
         return
     updated = existing_lines + [".relay/"]
-    exclude_path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
+    try:
+        exclude_path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
+    except OSError:
+        # Some sandboxes protect .git metadata. Relay memory remains local under
+        # .relay/ even when this convenience exclude cannot be written.
+        return
 
 
 def git_output(repo: RepoState, *args: str) -> str:
