@@ -2,9 +2,9 @@
 
 **Persistent memory for Claude Code and Codex CLI.**
 
-Claude Code forgets everything when you close the terminal. Relay fixes that.
+AI coding agents forget everything when you close the terminal. Relay fixes that.
 
-Every task you run gets logged. Every commit is tracked. Before every session, Relay injects what Claude needs to know — which files are active, what changed recently, what decisions were made — so Claude stops starting cold.
+Every task you run gets logged. Every commit is tracked. Before every session, Relay injects what your agent needs to know — which files are active, what changed recently, what decisions were made — so it stops starting cold.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
@@ -14,9 +14,9 @@ curl -fsSL https://raw.githubusercontent.com/tedevH/Relay/main/install.sh | bash
 
 ## The problem
 
-You open Claude Code. It reads your entire codebase to understand the project — again. You explain the context — again. It makes the same mistakes it already made last week — because it doesn't remember last week.
+You open Claude Code or Codex. It reads your entire codebase to understand the project — again. You explain the context — again. It makes the same mistakes it already made last week — because it doesn't remember last week.
 
-This happens on every session, every switch between Claude and Codex, every time you close the terminal.
+This happens on every session, every switch between agents, every time you close the terminal.
 
 ## What Relay does
 
@@ -25,9 +25,9 @@ Relay sits between you and your AI agents. It builds a memory of your project ov
 - **Tracks every task and commit** — via a git post-commit hook that logs silently in the background
 - **Extracts symbols** — functions, routes, constants with exact file and line numbers
 - **Tracks workstreams** — groups related tasks into named feature threads
-- **Injects context before every session** — Claude reads `.relay/context.md` on startup and knows your project without exploring it
+- **Injects context before every session** — agents read `.relay/context.md` on startup and know your project without exploring it
 
-The result: Claude starts sessions already knowing what changed, what's risky, and what the active workstream is.
+The result: your agent starts sessions already knowing what changed, what's risky, and what the active workstream is.
 
 ---
 
@@ -117,7 +117,7 @@ Before every `relay "task"`, Relay writes `.relay/context.md` and `CLAUDE.md` wi
 - Active workstream and its status
 - The specific files most likely to need editing
 
-Claude reads `CLAUDE.md` on startup. It goes directly to the relevant files instead of exploring the codebase.
+Both Claude Code and Codex read this context on startup and go directly to the relevant files instead of exploring the codebase.
 
 ---
 
