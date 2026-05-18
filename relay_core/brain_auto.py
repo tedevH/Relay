@@ -118,6 +118,7 @@ def _detect_repo_workflows(root: Path | None) -> dict[str, Any]:
     workflows: dict[str, Any] = {
         "test_commands": [],
         "build_commands": [],
+        "lint_commands": [],
         "dev_commands": [],
         "package_manager": "",
     }
@@ -127,19 +128,24 @@ def _detect_repo_workflows(root: Path | None) -> dict[str, Any]:
         try:
             data = json.loads(package_json.read_text(encoding="utf-8"))
             scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+            package_manager = _detect_package_manager(root)
             if "test" in scripts:
-                workflows["test_commands"].append("npm test")
+                workflows["test_commands"].append(_pm_run(package_manager, "test"))
+            if "lint" in scripts:
+                workflows["lint_commands"].append(_pm_run(package_manager, "lint"))
             if "build" in scripts:
-                workflows["build_commands"].append("npm run build")
+                workflows["build_commands"].append(_pm_run(package_manager, "build"))
             if "dev" in scripts:
-                workflows["dev_commands"].append("npm run dev")
-            workflows["package_manager"] = _detect_package_manager(root)
+                workflows["dev_commands"].append(_pm_run(package_manager, "dev"))
+            workflows["package_manager"] = package_manager
         except Exception:
             pass
 
     if (root / "pyproject.toml").exists() or (root / "requirements.txt").exists():
         if (root / "pytest.ini").exists() or (root / "tests").exists():
             workflows["test_commands"].append("pytest")
+        if (root / "ruff.toml").exists() or (root / ".ruff.toml").exists():
+            workflows["lint_commands"].append("ruff check .")
         workflows["package_manager"] = workflows["package_manager"] or "python"
 
     if (root / "go.mod").exists():
@@ -162,6 +168,14 @@ def _detect_package_manager(root: Path) -> str:
     if (root / "package-lock.json").exists():
         return "npm"
     return "npm"
+
+
+def _pm_run(package_manager: str, script: str) -> str:
+    if package_manager == "pnpm":
+        return "pnpm " + script
+    if package_manager == "yarn":
+        return "yarn " + script
+    return "npm test" if script == "test" else f"npm run {script}"
 
 
 def _write_agent_runbook(repo: RepoState, profile: dict[str, Any], task: str) -> None:
@@ -187,6 +201,7 @@ def _write_agent_runbook(repo: RepoState, profile: dict[str, Any], task: str) ->
     ]
 
     _extend_section(lines, "Test commands", profile.get("test_commands", []))
+    _extend_section(lines, "Lint commands", profile.get("lint_commands", []))
     _extend_section(lines, "Build commands", profile.get("build_commands", []))
     _extend_section(lines, "Hot files", hot_files)
     _extend_section(lines, "Risky files", risky_files)
@@ -217,6 +232,7 @@ def _write_brain_state(repo: RepoState, profile: dict[str, Any]) -> None:
         "framework": profile.get("framework", "unknown"),
         "primary_language": profile.get("primary_language", "unknown"),
         "test_commands": profile.get("test_commands", []),
+        "lint_commands": profile.get("lint_commands", []),
         "build_commands": profile.get("build_commands", []),
     }
     repo.brain_path.write_text(json.dumps(brain, indent=2) + "\n", encoding="utf-8")

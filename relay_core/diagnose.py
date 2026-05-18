@@ -163,6 +163,11 @@ def diagnose_failure(
         "prompt_version": str,
     }
     """
+    cheap = _cheap_diagnosis(task, done_condition, diff, error, prior_diagnosis)
+    if cheap is not None:
+        cheap["prompt_version"] = "deterministic-v1"
+        return cheap
+
     user_msg = _build_user_message(task, done_condition, diff, error, prior_diagnosis)
 
     raw = call(
@@ -204,6 +209,74 @@ def _parse_diagnosis(raw: str) -> dict[str, Any]:
         "should_retry": False,
         "escalate_reason": "Diagnosis model output could not be parsed. Manual review required.",
     }
+
+
+def _cheap_diagnosis(
+    task: str,
+    done_condition: str,
+    diff: str,
+    error: str,
+    prior_diagnosis: dict | None = None,
+) -> dict[str, Any] | None:
+    lowered = error.lower()
+    if "command not found:" in lowered:
+        match = re.search(r"command not found:\s*([^\n]+)", error, re.IGNORECASE)
+        missing = match.group(1).strip() if match else "required command"
+        return {
+            "root_cause": f"Verification could not run because the required command '{missing}' is unavailable.",
+            "category": "flaky",
+            "guidance": "Install the missing tool or configure Relay to use a verification command that exists in this repo environment.",
+            "confidence": 0.99,
+            "should_retry": False,
+            "escalate_reason": "The environment is missing a required verification command.",
+        }
+    if "unable to create automation branch" in lowered or "a branch named" in lowered:
+        return {
+            "root_cause": "Relay could not create the automation branch needed for the run.",
+            "category": "flaky",
+            "guidance": "Clean up or rename the conflicting branch before retrying the automation run.",
+            "confidence": 0.95,
+            "should_retry": False,
+            "escalate_reason": "Git branch creation failed.",
+        }
+    if not diff.strip():
+        return {
+            "root_cause": "The executor produced no code changes, so verification had nothing meaningful to validate.",
+            "category": "incomplete",
+            "guidance": "Focus the next attempt on editing the specific files needed for the task instead of re-analyzing the repo.",
+            "confidence": 0.9,
+            "should_retry": True,
+            "escalate_reason": None,
+        }
+    for label, keyword in (("lint", "lint"), ("build", "build"), ("test", "test")):
+        if keyword in lowered and "failed" in lowered:
+            return {
+                "root_cause": f"The task changes triggered a {label} failure during verification.",
+                "category": "regression",
+                "guidance": f"Use the failing {label} output to repair the introduced regression before making any broader changes.",
+                "confidence": 0.85,
+                "should_retry": True,
+                "escalate_reason": None,
+            }
+    if "verification timed out" in lowered:
+        return {
+            "root_cause": "Verification did not finish within Relay's timeout window.",
+            "category": "flaky",
+            "guidance": "Use a faster verification command or increase the verification budget before retrying the task.",
+            "confidence": 0.9,
+            "should_retry": False,
+            "escalate_reason": "Verification timed out.",
+        }
+    if prior_diagnosis and prior_diagnosis.get("root_cause") and prior_diagnosis.get("root_cause") in error:
+        return {
+            "root_cause": "The same failure repeated after retry, so the current automation loop is stuck.",
+            "category": "misunderstood_task",
+            "guidance": "Refine the task or investigate manually before spending more retry budget on the same approach.",
+            "confidence": 0.8,
+            "should_retry": False,
+            "escalate_reason": "The same failure repeated after a retry.",
+        }
+    return None
 
 
 # ── Verification (cheap, no LLM) ──────────────────────────────────────────

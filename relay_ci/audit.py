@@ -4,7 +4,7 @@ from typing import Any
 
 from relay_core.types import RepoState, RelayError
 from relay_core.utils import cli_available, missing_required_dependencies
-from relay_core.git import current_diff, changed_files, build_agent_command, stream_subprocess
+from relay_core.git import current_diff, changed_files, capture_agent_output
 from relay_core.memory import load_repo_tasks, latest_task, ensure_relay_files
 from relay_core.diff import classify_file_risk, classify_files_risk
 from relay_core.constants import MAX_DIFF_PROMPT_CHARS
@@ -61,9 +61,8 @@ def run_audit(repo: RepoState, ci_mode: bool = False) -> int:
         tui.console.print(f"[bold white]Audit[/bold white]  [dim]reviewing with {review_agent}[/dim]")
         tui.console.print()
 
-    command = build_agent_command(review_agent, prompt)
     cwd = repo.repo_root or repo.cwd
-    exit_code, output = stream_subprocess(command, cwd)
+    exit_code, output = capture_agent_output(review_agent, prompt, cwd)
 
     # Count findings by severity
     output_lower = output.lower()

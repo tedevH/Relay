@@ -15,6 +15,7 @@ Override via .relay/models.toml in any repo. Falls back to defaults.
 from __future__ import annotations
 import hashlib
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -60,6 +61,45 @@ _classify_cache: dict[str, Any] = {}
 
 def _cache_key(job: str, prompt: str) -> str:
     return hashlib.sha256(f"{job}:{prompt}".encode()).hexdigest()[:16]
+
+
+def _persistent_cache_path(relay_dir: Path | None) -> Path | None:
+    return relay_dir / "model-cache.json" if relay_dir else None
+
+
+def _load_persistent_cache(relay_dir: Path | None) -> dict[str, Any]:
+    path = _persistent_cache_path(relay_dir)
+    if not path or not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_persistent_cache(relay_dir: Path | None, cache: dict[str, Any]) -> None:
+    path = _persistent_cache_path(relay_dir)
+    if not path:
+        return
+    path.write_text(json.dumps(cache, indent=2) + "\n", encoding="utf-8")
+
+
+def _repo_fingerprint(relay_dir: Path | None) -> str:
+    if not relay_dir:
+        return "global"
+    repo_root = relay_dir.parent
+    markers = [
+        "package.json", "pyproject.toml", "go.mod", "Cargo.toml",
+        "requirements.txt", "pnpm-lock.yaml", "yarn.lock", "package-lock.json",
+    ]
+    parts: list[str] = []
+    for marker in markers:
+        path = repo_root / marker
+        if path.exists():
+            stat = path.stat()
+            parts.append(f"{marker}:{stat.st_mtime_ns}:{stat.st_size}")
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16] if parts else repo_root.name
 
 
 # ── Model loader (respects per-repo override) ─────────────────────────────
@@ -172,6 +212,16 @@ def classify_task(task: str, relay_dir: Path | None = None) -> dict[str, str]:
 
     Returns: {"tier": "trivial|feature|architectural", "reason": "..."}
     """
+    heuristic = _classify_task_heuristic(task)
+    if heuristic is not None:
+        return heuristic
+
+    cache = _load_persistent_cache(relay_dir)
+    cache_key = f"classify_task:{_repo_fingerprint(relay_dir)}:{task.strip().lower()}"
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict) and cached.get("tier"):
+        return cached
+
     prompt = f"""Classify this development task into exactly one tier.
 
 Task: {task}
@@ -190,7 +240,10 @@ Respond with JSON only:
         import re
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:
-            return json.loads(m.group())
+            result = json.loads(m.group())
+            cache[cache_key] = result
+            _save_persistent_cache(relay_dir, cache)
+            return result
     except Exception:
         pass
     return {"tier": "feature", "reason": "classification failed, defaulting to feature"}
@@ -198,6 +251,12 @@ Respond with JSON only:
 
 def infer_done_condition(task: str, relay_dir: Path | None = None) -> str:
     """Infer a verifiable done-condition from a task description (Haiku)."""
+    cache = _load_persistent_cache(relay_dir)
+    cache_key = f"infer_done_condition:{_repo_fingerprint(relay_dir)}:{task.strip().lower()}"
+    cached = cache.get(cache_key)
+    if isinstance(cached, str) and cached.strip():
+        return cached
+
     prompt = f"""Given this development task, state the single most concrete verifiable done-condition.
 
 Task: {task}
@@ -209,4 +268,31 @@ Rules:
 
 Done-condition:"""
 
-    return call("infer_done_condition", prompt, relay_dir=relay_dir)
+    result = call("infer_done_condition", prompt, relay_dir=relay_dir)
+    cache[cache_key] = result
+    _save_persistent_cache(relay_dir, cache)
+    return result
+
+
+def _classify_task_heuristic(task: str) -> dict[str, str] | None:
+    lowered = task.lower()
+    trivial_keywords = (
+        "rename", "typo", "spelling", "docs", "documentation", "readme",
+        "comment", "comments", "format", "formatting", "lint", "config",
+        "version bump", "bump version", "change config", "update docs",
+    )
+    architectural_keywords = (
+        "refactor", "architecture", "cross-cutting", "schema", "migration",
+        "new module", "new system", "restructure", "platform",
+    )
+
+    if any(keyword in lowered for keyword in trivial_keywords):
+        return {"tier": "trivial", "reason": "matched a local trivial-task heuristic"}
+    if any(keyword in lowered for keyword in architectural_keywords):
+        return {"tier": "architectural", "reason": "matched a local architectural-task heuristic"}
+    words = re.findall(r"\w+", lowered)
+    if len(words) <= 4 and any(word in lowered for word in ("fix", "add", "change", "update")):
+        return {"tier": "trivial", "reason": "short task with a narrowly scoped action verb"}
+    if len(words) <= 2:
+        return {"tier": "trivial", "reason": "very short task; defaulting to cheap local classification"}
+    return None

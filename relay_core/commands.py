@@ -390,7 +390,7 @@ def _run_diagnose(
     repo: RepoState,
 ) -> None:
     """Phase 2.5 — run one diagnose call after a failed task and show guidance."""
-    from relay_core.diagnose import diagnose_failure, verify_task, infer_done_condition
+    from relay_core.diagnose import diagnose_failure, verify_task
     from relay_core.models import infer_done_condition as haiku_condition
     from relay_core.git import current_diff
 
@@ -655,6 +655,18 @@ def run_init(repo: RepoState) -> int:
     # Fingerprint project
     tui.show_info("Scanning project...")
     profile = scan_project(repo)
+    from relay_core.memory import load_config, save_config
+    config = load_config(repo)
+    if not config.get("verify_commands"):
+        verify_commands = []
+        for key in ("test_commands", "lint_commands", "build_commands"):
+            values = profile.get(key, []) if isinstance(profile, dict) else []
+            if isinstance(values, list):
+                verify_commands.extend(str(value).strip() for value in values if str(value).strip())
+        config["verify_commands"] = list(dict.fromkeys(verify_commands))
+        if profile.get("package_manager"):
+            config["preferred_package_manager"] = profile["package_manager"]
+        save_config(repo, config)
 
     tui.console.print()
     from rich.panel import Panel

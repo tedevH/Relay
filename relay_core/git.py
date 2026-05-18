@@ -121,14 +121,13 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
         continued = False
         session_id = _load_codex_session(relay_dir)
         if session_id:
-            # Resume with context then run prompt in exec mode
-            # Flags must come before the subcommand
             command = [
                 "codex",
                 "--ask-for-approval", "never",
-                "exec", "--sandbox", "workspace-write",
-                f"[Resuming session {session_id}] {prompt}",
+                "--sandbox", "workspace-write",
+                "exec", "resume", session_id, prompt,
             ]
+            continued = True
         else:
             command = [
                 "codex",
@@ -184,7 +183,7 @@ def run_agent(agent: str, prompt: str, cwd: Path, relay_dir: Path | None = None)
         if new_id and relay_dir:
             _save_codex_session(relay_dir, new_id)
 
-    resumed = continued if agent == "claude" else (_load_codex_session(relay_dir) is not None)
+    resumed = continued if agent == "claude" else continued
     return process.returncode, "".join(output_lines), resumed
 
 

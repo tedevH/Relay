@@ -20,6 +20,10 @@ def discover_verify_commands(repo_root: Path, config: dict[str, Any] | None = No
     if configured:
         return [_split_command(cmd) for cmd in configured if str(cmd).strip()]
 
+    profile_commands = _project_profile_commands(repo_root)
+    if profile_commands:
+        return [_split_command(cmd) for cmd in profile_commands]
+
     if (repo_root / "package.json").exists():
         package = _read_package_json(repo_root / "package.json")
         scripts = package.get("scripts", {}) if isinstance(package, dict) else {}
@@ -75,9 +79,15 @@ def run_verification(
 
 def verification_passed(result: dict[str, Any]) -> bool:
     tests = result.get("tests", {})
-    if tests.get("passed") is True:
-        return True
-    return result.get("done_condition_met") is True
+    tests_passed = tests.get("passed")
+    done_passed = result.get("done_condition_met")
+    if tests_passed is False:
+        return False
+    if tests_passed is True and done_passed is False:
+        return False
+    if tests_passed is True:
+        return True if done_passed is not False else False
+    return done_passed is True
 
 
 def _run_check(command: list[str], cwd: Path) -> dict[str, Any]:
@@ -124,6 +134,22 @@ def _read_package_json(path: Path) -> dict[str, Any]:
 
 def _split_command(command: str) -> list[str]:
     return shlex.split(command)
+
+
+def _project_profile_commands(repo_root: Path) -> list[str]:
+    path = repo_root / ".relay" / "project.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    commands: list[str] = []
+    for key in ("test_commands", "lint_commands", "build_commands"):
+        values = data.get(key, [])
+        if isinstance(values, list):
+            commands.extend(str(value).strip() for value in values if str(value).strip())
+    return list(dict.fromkeys(commands))
 
 
 def _done_condition_checks(

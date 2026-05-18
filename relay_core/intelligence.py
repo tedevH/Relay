@@ -291,7 +291,19 @@ def generate_context(repo: RepoState, task: str) -> str:
 
     # ── Repo structure (minimal) ──
     if profile:
+        test_commands = profile.get("test_commands", [])
+        lint_commands = profile.get("lint_commands", [])
+        build_commands = profile.get("build_commands", [])
         lines.append("## Repo")
         lines.append(f"Framework: {profile.get('framework', 'unknown')} · {profile.get('primary_language', 'unknown')}")
+        if test_commands:
+            lines.append(f"Tests: {', '.join(test_commands[:2])}")
+        if lint_commands:
+            lines.append(f"Lint: {', '.join(lint_commands[:2])}")
+        if build_commands:
+            lines.append(f"Build: {', '.join(build_commands[:2])}")
+        known_failures = profile.get("known_failures", [])
+        if known_failures:
+            lines.append(f"Last failure: {known_failures[-1].get('summary', '')[:160]}")
 
     return "\n".join(lines) if lines else "No relevant prior state found."

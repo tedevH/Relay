@@ -131,6 +131,7 @@ def run_auto(
     if not until:
         tui.show_info("Inferring done-condition...")
         until = infer_done_condition(task, relay_dir=relay_dir)
+    preflight_cost = session_cost()
 
     decision = route_task(task, repo, forced_agent=forced_agent)
     initial_agent = _select_initial_agent(decision.agent, repo, agent_policy, forced_agent, task)
@@ -160,6 +161,7 @@ def run_auto(
         files_changed=[],
         started_at=timestamp_now(),
     )
+    run.cost_usd = preflight_cost
     _save_run(relay_dir, run_dir, run)
     _show_auto_header(run, decision.reason)
 
@@ -179,8 +181,10 @@ def run_auto(
             )
 
             from relay_core.commands import _write_context
-            _write_context(repo, prompt)
+            context_task = task if not prior_diagnosis else f"{task}\n\nRetry focus: {prior_diagnosis.get('guidance', '')}"
+            _write_context(repo, context_task)
 
+            attempt_cost_before = session_cost()
             exit_code, output, _resumed = run_agent(
                 current_agent,
                 prompt,
@@ -189,7 +193,7 @@ def run_auto(
             )
             clean = save_output(relay_dir, current_agent, output)
             _write_attempt_log(run_dir, attempt_index + 1, current_agent, clean)
-            run.cost_usd += session_cost()
+            run.cost_usd += max(0.0, session_cost() - attempt_cost_before)
 
             if clean.strip():
                 tui.show_review_output(current_agent, clean, exit_code)
@@ -219,6 +223,7 @@ def run_auto(
                 verify_commands=[check.get("command", "") for check in verification.get("commands", []) if check.get("command")],
                 risky_files=[file for file in files if _risky_file(file)],
                 known_failure=(verification.get("tests", {}).get("output") or "")[:240] if not verification_passed(verification) else None,
+                lint_commands=[check.get("command", "") for check in verification.get("commands", []) if "lint" in str(check.get("command", ""))],
             )
             attempt = BrainAttempt(
                 attempt=attempt_index + 1,
@@ -275,6 +280,7 @@ def run_auto(
 
             tui.show_info("Diagnosing failure...")
             error_output = _failed_verification_report(verification) or clean[-2000:]
+            diagnosis_cost_before = session_cost()
             diagnosis = diagnose_failure(
                 task=task,
                 done_condition=until,
@@ -283,7 +289,7 @@ def run_auto(
                 prior_diagnosis=prior_diagnosis,
                 relay_dir=relay_dir,
             )
-            run.cost_usd += session_cost()
+            run.cost_usd += max(0.0, session_cost() - diagnosis_cost_before)
             failure_report = _failed_verification_report(verification)
             if failure_report:
                 diagnosis["verification_output"] = failure_report

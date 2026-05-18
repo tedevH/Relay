@@ -58,6 +58,12 @@ Tier definitions:
 
 def decompose(goal: str, relay_dir: Path | None = None) -> dict:
     """Decompose a goal into subtasks via Sonnet. Returns plan dict."""
+    cache_key = _plan_cache_key(goal, relay_dir)
+    cache = _load_plan_cache(relay_dir)
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict) and cached.get("subtasks"):
+        return cached
+
     raw = call(
         "plan_decompose",
         f"Decompose this development goal into subtasks:\n\n{goal}",
@@ -68,10 +74,54 @@ def decompose(goal: str, relay_dir: Path | None = None) -> dict:
     m = re.search(r'\{.*\}', raw, re.DOTALL)
     if m:
         try:
-            return json.loads(m.group())
+            plan = json.loads(m.group())
+            cache[cache_key] = plan
+            _save_plan_cache(relay_dir, cache)
+            return plan
         except json.JSONDecodeError:
             pass
     raise RelayError(f"Planner produced unparseable output:\n{raw[:500]}")
+
+
+def _plan_cache_path(relay_dir: Path | None) -> Path | None:
+    return relay_dir / "plan-cache.json" if relay_dir else None
+
+
+def _load_plan_cache(relay_dir: Path | None) -> dict[str, dict]:
+    path = _plan_cache_path(relay_dir)
+    if not path or not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_plan_cache(relay_dir: Path | None, cache: dict[str, dict]) -> None:
+    path = _plan_cache_path(relay_dir)
+    if not path:
+        return
+    path.write_text(json.dumps(cache, indent=2) + "\n", encoding="utf-8")
+
+
+def _plan_cache_key(goal: str, relay_dir: Path | None) -> str:
+    if not relay_dir:
+        fingerprint = "global"
+    else:
+        repo_root = relay_dir.parent
+        markers = [
+            "package.json", "pyproject.toml", "go.mod", "Cargo.toml",
+            "requirements.txt", "pnpm-lock.yaml", "yarn.lock", "package-lock.json",
+        ]
+        parts: list[str] = []
+        for marker in markers:
+            path = repo_root / marker
+            if path.exists():
+                stat = path.stat()
+                parts.append(f"{marker}:{stat.st_mtime_ns}:{stat.st_size}")
+        fingerprint = "|".join(parts) if parts else repo_root.name
+    return f"{fingerprint}:{goal.strip().lower()}"
 
 
 # ── Plan display ───────────────────────────────────────────────────────────

@@ -103,6 +103,14 @@ def load_config(repo: RepoState) -> dict[str, Any]:
         return default_config()
 
 
+def save_config(repo: RepoState, config: dict[str, Any]) -> None:
+    if not repo.config_path:
+        raise RelayError("Relay config path is unavailable.")
+    base = default_config()
+    base.update(config)
+    repo.config_path.write_text(json.dumps(base, indent=2) + "\n", encoding="utf-8")
+
+
 def load_repo_tasks(repo: RepoState) -> list[dict[str, Any]]:
     if not repo.tasks_path or not repo.tasks_path.exists():
         return []
@@ -226,6 +234,7 @@ def update_project_knowledge(
     verify_commands: list[str] | None = None,
     risky_files: list[str] | None = None,
     known_failure: str | None = None,
+    lint_commands: list[str] | None = None,
 ) -> None:
     profile = load_project_profile(repo) or {}
     if verify_commands:
@@ -233,10 +242,16 @@ def update_project_knowledge(
         profile["verify_commands"] = sorted(set(existing + verify_commands))
         tests = [cmd for cmd in profile["verify_commands"] if "test" in cmd or "pytest" in cmd]
         builds = [cmd for cmd in profile["verify_commands"] if "build" in cmd]
+        lints = [cmd for cmd in profile["verify_commands"] if "lint" in cmd or "ruff" in cmd or "flake8" in cmd]
         if tests:
             profile["test_commands"] = tests
         if builds:
             profile["build_commands"] = builds
+        if lints:
+            profile["lint_commands"] = lints
+    if lint_commands:
+        existing_lints = profile.get("lint_commands", [])
+        profile["lint_commands"] = sorted(set(existing_lints + lint_commands))
     if risky_files:
         existing_risky = profile.get("risky_files", [])
         profile["risky_files"] = sorted(set(existing_risky + risky_files))[:50]
