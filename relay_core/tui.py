@@ -347,7 +347,21 @@ def show_outcome(outcome: dict[str, Any]) -> None:
     if outcome.get("suggested_commit_message"):
         table.add_row("Commit msg", outcome["suggested_commit_message"])
 
-    border = "red" if warnings or not success or verified is False else "green"
+    verify_commands = (outcome.get("verification") or {}).get("commands") or []
+    for idx, check in enumerate(verify_commands):
+        cmd_str = check.get("command", "")
+        if check.get("passed") is True:
+            status = Text("✓ pass", style="bold green")
+        elif check.get("passed") is False:
+            status = Text("✗ fail", style="bold red")
+        else:
+            status = Text("? unknown", style="dim")
+        row_label = "Checks" if idx == 0 else ""
+        row_val = Text(cmd_str + "  ") + status
+        table.add_row(row_label, row_val)
+
+    checks_failed = any(not c.get("passed") for c in verify_commands if c.get("passed") is not None)
+    border = "red" if warnings or not success or verified is False or checks_failed else "green"
     console.print()
     console.print(Panel(table, title="[bold white]Relay Outcome[/bold white]", border_style=border, padding=(0, 1)))
 
