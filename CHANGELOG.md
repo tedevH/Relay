@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.6
+
+- Added automatic brain refresh before agent runs so users do not need to manually run context, digest, or brain maintenance commands.
+- Added `.relay/runbook.md`, an automatically maintained agent operating manual with workflows, hot files, risky files, and recent lessons.
+- Added automatic learning from task and automation runs into symbols, workstreams, project knowledge, and future retry context.
+
 ## v0.5.5
 
 - Fixed Rich markup crashes when agent output contains bracketed text that looks like terminal markup.

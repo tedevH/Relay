@@ -24,6 +24,7 @@ from relay_core.memory import (
     load_memory, load_project_profile, update_memory_after_task,
 )
 from relay_core.outcome import build_outcome, save_outcome, load_outcome
+from relay_core.brain_auto import refresh_brain, learn_from_run
 from relay_core.routing import route_task, scan_project
 from relay_core.diff import (
     classify_files_risk, classify_file_risk,
@@ -68,6 +69,7 @@ def run_task(
         return 1
 
     ensure_relay_files(repo)
+    refresh_brain(repo, task)
 
     decision = route_task(task, repo, forced_agent=forced_agent)
     agent = decision.agent
@@ -107,6 +109,14 @@ def run_task(
     if len(files) > 20:
         warnings.append("more than 20 files changed")
     save_last_diff(repo, diff_text)
+    learn_from_run(
+        repo,
+        task=task,
+        agent=agent,
+        files=files,
+        diff_text=diff_text,
+        success=exit_code == 0,
+    )
 
     # Show clean output panel
     if clean.strip():
@@ -191,6 +201,8 @@ def _write_context(repo: RepoState, task: str, tier: str = "feature") -> None:
         "- Relevant symbols and their exact file locations\n"
         "- Active workstreams and their status\n"
         "- The specific files most likely to need editing\n\n"
+        "**Also read `.relay/runbook.md` when present.** It is Relay's automatically maintained "
+        "agent operating manual for tests, builds, risky files, and recent lessons.\n\n"
         "**Do not explore the codebase broadly.** Go directly to the files listed in `.relay/context.md`.\n\n"
         f"```\n{context[:1500]}\n```\n"
     )
@@ -633,6 +645,7 @@ def run_init(repo: RepoState) -> int:
         raise RelayError("relay init requires a git repository.")
 
     ensure_relay_files(repo)
+    refresh_brain(repo, "initialize Relay", force=True)
 
     # Install git hook
     from relay_core.hooks import install_hooks, hooks_installed
@@ -648,13 +661,10 @@ def run_init(repo: RepoState) -> int:
     from rich.text import Text
     content = Text()
     content.append("✓  Git hook installed\n", style="bold green")
-    content.append("✓  Project fingerprinted\n", style="bold green")
+    content.append("✓  Project brain refreshed\n", style="bold green")
     content.append("✓  .relay/ initialised\n", style="bold green")
     content.append("\n", style="")
-    content.append("Every commit is now logged automatically.\n", style="dim")
-    content.append("Run ", style="dim")
-    content.append("relay digest", style="bold cyan")
-    content.append(" to see your project activity.", style="dim")
+    content.append("Relay will refresh context, runbook, and memory automatically before agent runs.", style="dim")
     tui.console.print(Panel(content, title="[bold white]Relay Initialised[/bold white]",
                             border_style="green", padding=(1, 2)))
     return 0
@@ -665,6 +675,7 @@ def run_context(repo: RepoState) -> int:
     if not repo.in_git_repo:
         raise RelayError("relay context requires a git repository.")
 
+    refresh_brain(repo, "inspect project context")
     tasks = load_repo_tasks(repo) if repo.tasks_path and repo.tasks_path.exists() else []
     mem = load_memory(repo) if repo.memory_path else {}
     profile = load_project_profile(repo)
@@ -678,6 +689,7 @@ def run_digest(repo: RepoState) -> int:
     if not repo.in_git_repo:
         raise RelayError("relay digest requires a git repository.")
 
+    refresh_brain(repo, "inspect project digest")
     tasks = load_repo_tasks(repo) if repo.tasks_path and repo.tasks_path.exists() else []
     mem = load_memory(repo) if repo.memory_path else {}
     profile = load_project_profile(repo)

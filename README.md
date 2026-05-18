@@ -4,6 +4,8 @@
 
 Relay gives your coding agents memory, chooses the right agent for the job, runs a verification loop, and shows you a clear outcome card so you know what changed and what to do next.
 
+Relay maintains its brain automatically. Users should not need to run separate context, digest, or brain-maintenance commands before asking for work.
+
 ## Install
 
 ```bash
@@ -38,6 +40,7 @@ relay push
 
 `relay go`:
 
+- refreshes the project brain and agent runbook automatically
 - infers a done condition
 - routes to Claude or Codex by task fit
 - creates a dedicated branch
@@ -134,6 +137,8 @@ Before every run, Relay writes `.relay/context.md` and updates `CLAUDE.md` with:
 - active workstream status
 - the files most likely to need editing
 
+Relay also writes `.relay/runbook.md`, an agent operating manual with detected test/build commands, hot files, risky files, active workstreams, and recent lessons. This happens automatically before agent runs.
+
 Both Claude Code and Codex can use this context instead of starting cold.
 
 ## Local Memory Structure
@@ -145,6 +150,7 @@ Both Claude Code and Codex can use this context instead of starting cold.
   symbols.json
   workstreams.json
   context.md
+  runbook.md
   last-diff.patch
   last-outcome.json
   config.json

@@ -105,6 +105,7 @@ def show_home(repo: Any, missing_deps: list[str]) -> None:
     # ── Returning user — daily workflow ────────────────────────────
     workflow = Text()
     workflow.append("Daily workflow\n\n", style="bold white")
+    workflow.append("Relay refreshes project memory and agent runbooks automatically.\n\n", style="dim")
 
     workflow.append('relay go "task"      ', style="bold cyan")
     workflow.append("→ run, verify, retry, auto-commit, summarize\n", style="dim")

@@ -30,6 +30,7 @@ from relay_core.memory import (
 )
 from relay_core.routing import route_task
 from relay_core.outcome import build_outcome, save_outcome
+from relay_core.brain_auto import refresh_brain, learn_from_run
 import relay_core.tui as tui
 
 
@@ -108,6 +109,7 @@ def run_auto(
     ensure_relay_files(repo)
     relay_dir = repo.relay_dir
     assert relay_dir is not None
+    refresh_brain(repo, task)
 
     config = load_config(repo)
     mode = _normalize_mode(mode or config.get("automation_mode", "edit"))
@@ -203,6 +205,15 @@ def run_auto(
 
             tui.show_info("Verifying...")
             verification = run_verification(repo.repo_root or repo.cwd, until, files, config)
+            learn_from_run(
+                repo,
+                task=task,
+                agent=current_agent,
+                files=files,
+                diff_text=diff,
+                success=exit_code == 0 and verification_passed(verification),
+                verification=verification,
+            )
             update_project_knowledge(
                 repo,
                 verify_commands=[check.get("command", "") for check in verification.get("commands", []) if check.get("command")],
