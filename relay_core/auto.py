@@ -263,7 +263,7 @@ def run_auto(
                 break
 
             tui.show_info("Diagnosing failure...")
-            error_output = verification.get("tests", {}).get("output") or clean[-2000:]
+            error_output = _failed_verification_report(verification) or clean[-2000:]
             diagnosis = diagnose_failure(
                 task=task,
                 done_condition=until,
@@ -273,11 +273,15 @@ def run_auto(
                 relay_dir=relay_dir,
             )
             run.cost_usd += session_cost()
+            failure_report = _failed_verification_report(verification)
+            if failure_report:
+                diagnosis["verification_output"] = failure_report
             attempt.diagnosis = diagnosis
             run.attempts.append(asdict(attempt))
             _save_run(relay_dir, run_dir, run)
 
             if not diagnosis.get("should_retry"):
+                _show_failed_verification(verification)
                 return _halt(
                     relay_dir,
                     run_dir,
@@ -290,7 +294,15 @@ def run_auto(
             run.retries_used += 1
             current_agent = _next_agent(current_agent, agent_policy, forced_agent)
             run.current_agent = current_agent
-            _show_retry_header(run.retries_used, max_retries, current_agent, diagnosis.get("guidance", ""))
+            next_prompt = _build_prompt(task, until, prior_diagnosis)
+            _show_retry_header(
+                run.retries_used,
+                max_retries,
+                current_agent,
+                diagnosis.get("guidance", ""),
+                next_prompt,
+                failure_report,
+            )
 
         run.status = "failed"
         run.finished_at = timestamp_now()
@@ -298,6 +310,21 @@ def run_auto(
         flush_costs(relay_dir)
         _save_run(relay_dir, run_dir, run)
         _show_auto_result(run)
+        last_verification = run.attempts[-1].get("verification", {}) if run.attempts else {}
+        outcome = build_outcome(
+            repo,
+            task=task,
+            command_type="auto",
+            agent=run.current_agent,
+            exit_code=1,
+            verified=False if last_verification else None,
+            verification=last_verification,
+            branch=branch,
+            run_id=run.id,
+            files_override=run.files_changed,
+        )
+        save_outcome(repo, outcome)
+        tui.show_outcome(outcome)
         return 1
 
     except KeyboardInterrupt:
@@ -398,11 +425,20 @@ def _build_prompt(task: str, done_condition: str, diagnosis: dict[str, Any] | No
     if not diagnosis:
         return f"Task: {task}\n\nDone when: {done_condition}"
     guidance = diagnosis.get("guidance", "")
-    return (
+    prompt = (
         f"Task: {task}\n\n"
         f"Done when: {done_condition}\n\n"
         f"Guidance from verification diagnosis: {guidance}"
     )
+    verification_output = diagnosis.get("verification_output", "")
+    if verification_output:
+        prompt += (
+            "\n\nFailed verification output from the previous attempt:\n"
+            "```text\n"
+            f"{verification_output}\n"
+            "```"
+        )
+    return prompt
 
 
 def _prepare_run_dir(relay_dir: Path, run_id: str) -> Path:
@@ -544,11 +580,65 @@ def _show_auto_header(run: AutoRun, routing_reason: str) -> None:
                          border_style="cyan", padding=(0, 1)))
 
 
-def _show_retry_header(attempt: int, max_retries: int, agent: str, guidance: str) -> None:
+def _failed_verification_report(verification: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for check in verification.get("commands", []) or []:
+        if check.get("passed") is not False:
+            continue
+        command = str(check.get("command") or "").strip()
+        returncode = check.get("returncode")
+        output = str(check.get("output") or "").rstrip()
+        header = f"$ {command}" if command else "$ <unknown verification command>"
+        if returncode is not None:
+            header += f"\nexit code: {returncode}"
+        parts.append(f"{header}\n{output}".rstrip())
+
+    if parts:
+        return "\n\n".join(parts)
+    return str((verification.get("tests") or {}).get("output") or "").rstrip()
+
+
+def _show_failed_verification(verification: dict[str, Any] | None = None, report: str = "") -> None:
+    from rich.panel import Panel
+    from rich.text import Text
+
+    if not report:
+        report = _failed_verification_report(verification or {})
+    if not report:
+        return
+    tui.console.print()
+    tui.console.print(Panel(
+        Text(report),
+        title="[bold red]Failed Verification Output[/bold red]",
+        border_style="red",
+        padding=(1, 2),
+    ))
+
+
+def _show_retry_header(
+    attempt: int,
+    max_retries: int,
+    agent: str,
+    guidance: str,
+    next_prompt: str = "",
+    failure_report: str = "",
+) -> None:
     tui.console.print(
         f"\n[bold yellow]Retry {attempt}/{max_retries}[/bold yellow]  "
         f"[dim]Next agent: {agent.capitalize()} | {guidance[:90]}[/dim]\n"
     )
+    if failure_report:
+        _show_failed_verification(report=failure_report)
+    if next_prompt:
+        from rich.panel import Panel
+        from rich.text import Text
+
+        tui.console.print(Panel(
+            Text(next_prompt),
+            title="[bold white]Next Retry Prompt[/bold white]",
+            border_style="yellow",
+            padding=(1, 2),
+        ))
 
 
 def _show_auto_result(run: AutoRun) -> None:

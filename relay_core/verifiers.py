@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,7 @@ def run_verification(
         "changed": len(changed_files) > 0,
         "commands": checks,
         "done_checks": done_checks["checks"],
-        "tests": {"passed": all_passed, "output": output[:3000]},
+        "tests": {"passed": all_passed, "output": output},
         "done_condition_met": done_met,
     }
 
@@ -84,31 +85,32 @@ def _run_check(command: list[str], cwd: Path) -> dict[str, Any]:
         completed = subprocess.run(
             command,
             cwd=str(cwd),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             timeout=DEFAULT_TIMEOUT_SECONDS,
         )
-        output = (completed.stdout or "") + (completed.stderr or "")
+        output = completed.stdout or ""
         return {
-            "command": " ".join(command),
+            "command": shlex.join(command),
             "returncode": completed.returncode,
             "passed": completed.returncode == 0,
-            "output": output[:3000],
+            "output": output,
         }
     except FileNotFoundError:
         return {
-            "command": " ".join(command),
+            "command": shlex.join(command),
             "returncode": 127,
             "passed": False,
             "output": f"Command not found: {command[0]}",
         }
     except subprocess.TimeoutExpired as exc:
-        output = ((exc.stdout or "") + (exc.stderr or "")) if isinstance(exc.stdout, str) else ""
+        output = exc.stdout if isinstance(exc.stdout, str) else ""
         return {
-            "command": " ".join(command),
+            "command": shlex.join(command),
             "returncode": 124,
             "passed": False,
-            "output": (output + "\nVerification timed out.").strip()[:3000],
+            "output": (output + "\nVerification timed out.").strip(),
         }
 
 
@@ -121,7 +123,6 @@ def _read_package_json(path: Path) -> dict[str, Any]:
 
 
 def _split_command(command: str) -> list[str]:
-    import shlex
     return shlex.split(command)
 
 

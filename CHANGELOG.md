@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.5
+
+- Fixed Rich markup crashes when agent output contains bracketed text that looks like terminal markup.
+- Improved failed verification display so `relay last` can show verification command status and output.
+- Added failed verification output to retry guidance for automation runs.
+
 ## v0.5.4
 
 - Added `relay go` as the daily-driver verified automation command.

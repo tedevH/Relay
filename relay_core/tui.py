@@ -369,6 +369,25 @@ def show_outcome(outcome: dict[str, Any]) -> None:
         warn_text = "\n".join(f"- {warning}" for warning in warnings)
         console.print(Panel(warn_text, title="[bold yellow]Needs Attention[/bold yellow]", border_style="yellow"))
 
+    failed_outputs = []
+    for check in verify_commands:
+        if check.get("passed") is not False:
+            continue
+        command = str(check.get("command") or "").strip()
+        returncode = check.get("returncode")
+        output = str(check.get("output") or "").rstrip()
+        header = f"$ {command}" if command else "$ <unknown verification command>"
+        if returncode is not None:
+            header += f"\nexit code: {returncode}"
+        failed_outputs.append(f"{header}\n{output}".rstrip())
+    if failed_outputs:
+        console.print(Panel(
+            Text("\n\n".join(failed_outputs)),
+            title="[bold red]Failed Verification Output[/bold red]",
+            border_style="red",
+            padding=(1, 2),
+        ))
+
     next_steps = outcome.get("next_steps", [])
     if next_steps:
         console.print("[bold white]Next[/bold white]")
@@ -619,9 +638,9 @@ def show_local_review(
 
 def show_review_output(agent: str, output: str, exit_code: int) -> None:
     """Display captured review output in a clean panel instead of raw terminal dump."""
+    from rich.text import Text
     from relay_core.utils import normalize_agent_name
     name = normalize_agent_name(agent)
-    color = AGENT_COLORS.get(agent, "white")
 
     # Strip internal tool noise from Codex (exec lines, file reads, etc.)
     cleaned_lines = []
@@ -647,8 +666,8 @@ def show_review_output(agent: str, output: str, exit_code: int) -> None:
     border = "green" if exit_code == 0 else "yellow"
     console.print()
     console.print(Panel(
-        cleaned,
-        title=f"[{color}]{name} Review Findings[/{color}]",
+        Text(cleaned),
+        title=f"{name} Review Findings",
         border_style=border,
         padding=(1, 2),
     ))
